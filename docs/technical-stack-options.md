@@ -1,6 +1,6 @@
 # 光之林：技术栈与重构架构草案
 
-状态：**待核心玩法确认后实施**  
+状态：**已用于 V2 可玩原型，正式产品选型仍可在试玩后调整**
 日期：2026-07-17
 
 ## 这次试玩推翻了什么
@@ -28,6 +28,8 @@
 ## 当前推荐
 
 采用：**Vite + TypeScript + Phaser 3 + Apache ECharts**，不使用 React，不设后端。
+
+该组合已经落地到 `prototype-v2/`：模拟核心与 Phaser 渲染分离，ECharts 读取模拟历史，三种布局通过 `?variant=A/B/C` 切换。
 
 - Phaser：地图、个体点位、hover/click、摄像机、连续更新循环；
 - TypeScript：生态模拟、规则和数据结构；

@@ -1,0 +1,17 @@
+{
+  "name": "light-forest-prototype",
+  "private": true,
+  "scripts": {
+    "demo": "vite prototype-v2",
+    "build:demo": "tsc -p prototype-v2/tsconfig.json && vite build prototype-v2",
+    "preview:demo": "vite preview prototype-v2"
+  },
+  "dependencies": {
+    "echarts": "^6.0.0",
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0"
+  }
+}
