@@ -57,9 +57,9 @@ h1, h2, p { margin-top: 0; }
 }
 
 .app-shell {
-  width: min(1580px, calc(100% - 28px));
+  width: min(1500px, calc(100% - 28px));
   margin: 0 auto;
-  padding: 18px 0 82px;
+  padding: 14px 0 40px;
 }
 
 .app-header {
@@ -128,7 +128,7 @@ h1, h2, p { margin-top: 0; }
 
 .game-root {
   width: 100%;
-  aspect-ratio: 48 / 31;
+  height: clamp(460px, 54vh, 620px);
   overflow: hidden;
   border: 1px solid #ffffff77;
   border-radius: 12px;
@@ -270,39 +270,51 @@ input[type="range"]::-webkit-slider-thumb {
 .event-panel[data-tone="warning"] .event-dot { background: #c86e45; box-shadow: 0 0 0 4px #c86e4518; }
 .event-panel[data-tone="bad"] .event-dot { background: #a84f43; }
 
-/* A — 投资工作台 */
-.workbench-grid { display: grid; grid-template-columns: minmax(0, 1.58fr) minmax(340px, .72fr); gap: 12px; align-items: start; }
-.workbench-map { min-width: 0; }
-.control-rail { display: grid; gap: 10px; max-height: calc(100vh - 105px); padding-right: 2px; overflow: auto; }
-.layout-a .chart-panel .population-chart { height: 220px; }
+/* Unified game dashboard */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(380px, .85fr);
+  gap: 12px;
+  align-items: start;
+}
 
-/* B — 森林优先 */
-.layout-b { width: min(1660px, calc(100% - 28px)); }
-.forest-stage { position: relative; }
-.layout-b .map-panel { padding: 8px; background: #1e3d37; border-color: #294f47; }
-.layout-b .map-heading { color: #f4f4e8; }
-.layout-b .map-heading .label, .layout-b .map-heading .legend { color: #b9c9be; }
-.layout-b .light-scale { color: #c2cdc5; }
-.forest-overlay { position: absolute; z-index: 8; width: min(280px, 27%); }
-.forest-overlay .surface { background: #f8f8f2e8; box-shadow: 0 18px 55px #102b2255; backdrop-filter: blur(12px); }
-.overlay-overview { top: 74px; left: 18px; }
-.overlay-selected { top: 74px; right: 18px; }
-.overlay-event { right: 18px; bottom: 28px; width: min(430px, 46%); }
-.overlay-event .event-panel { margin: 0; }
-.bottom-dock { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-.layout-b .population-chart { height: 190px; }
+.dashboard-map-column,
+.dashboard-side {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
 
-/* C — 研究仪表盘 */
-.analysis-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(390px, .8fr); grid-template-rows: auto auto; gap: 12px; align-items: start; }
-.analysis-map { grid-column: 1; grid-row: 1; min-width: 0; }
-.analysis-chart { grid-column: 2; grid-row: 1; }
-.analysis-side { display: grid; grid-column: 2; grid-row: 2; gap: 10px; }
-.analysis-side .event-panel { margin: 0; display: block; }
-.analysis-side .event-status { margin-bottom: 7px; }
-.analysis-allocation { grid-column: 1; grid-row: 2; }
-.layout-c .population-chart { height: 285px; }
-.layout-c .allocation-panel { display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 22px; }
-.layout-c .allocation-panel .panel-heading, .layout-c .allocation-panel .carbon-flow { grid-column: 1 / -1; }
+.dashboard-map-column .event-panel { margin-top: 0; }
+
+.dashboard-side {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.dashboard-side .overview-panel,
+.dashboard-side .selected-panel,
+.dashboard-side .chart-panel {
+  min-width: 0;
+}
+
+.dashboard-side .population-chart { height: 180px; }
+
+.dashboard-allocation {
+  grid-column: 1 / -1;
+}
+
+.dashboard-allocation .allocation-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 26px;
+}
+
+.dashboard-allocation .panel-heading,
+.dashboard-allocation .carbon-flow {
+  grid-column: 1 / -1;
+}
+
+.dashboard-allocation .allocation-row { margin: 5px 0 10px; }
 
 .hover-tooltip {
   position: fixed;
@@ -354,27 +366,6 @@ input[type="range"]::-webkit-slider-thumb {
   font-weight: 800;
 }
 .modal-actions .quiet-button { border: 1px solid var(--line); background: #edf0e8; color: var(--ink); }
-
-.prototype-switcher {
-  position: fixed;
-  z-index: 100;
-  left: 50%;
-  bottom: 17px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-width: 250px;
-  padding: 7px;
-  border: 1px solid #ffffff22;
-  border-radius: 999px;
-  background: #13271ff2;
-  color: #fff;
-  box-shadow: 0 12px 40px #12291f55;
-  transform: translateX(-50%);
-}
-
-.prototype-switcher span { flex: 1; text-align: center; font-size: 11px; font-weight: 800; }
-.prototype-switcher button { width: 31px; height: 31px; border: 0; border-radius: 99px; background: #ffffff18; color: #fff; }
 
 .setup-screen {
   display: grid;
@@ -429,26 +420,25 @@ input[type="range"]::-webkit-slider-thumb {
 .setup-note { margin: 10px 4px 0; color: var(--muted); font-size: 9px; text-align: center; }
 
 @media (max-width: 1120px) {
-  .workbench-grid, .analysis-grid { grid-template-columns: 1fr; }
-  .control-rail { grid-template-columns: repeat(2, 1fr); max-height: none; overflow: visible; }
-  .analysis-map, .analysis-chart, .analysis-side, .analysis-allocation { grid-column: 1; grid-row: auto; }
-  .analysis-side { grid-template-columns: repeat(2, 1fr); }
-  .layout-c .allocation-panel { display: block; }
+  .dashboard-grid { grid-template-columns: 1fr; }
+  .dashboard-side { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto; }
+  .dashboard-side .chart-panel { grid-column: 1 / -1; }
+  .dashboard-side .population-chart { height: 270px; }
+  .dashboard-allocation { grid-column: 1; }
   .setup-screen { grid-template-columns: 1fr; min-height: auto; padding-top: 50px; }
   .setup-copy h1 { font-size: 62px; }
 }
 
 @media (max-width: 760px) {
-  .app-shell { width: min(100% - 16px, 1580px); padding-top: 9px; }
+  .app-shell { width: min(100% - 16px, 1500px); padding-top: 9px; }
   .app-header { align-items: flex-start; }
   .header-actions { flex-wrap: wrap; justify-content: flex-end; }
   .clock { width: 100%; }
   .legend { display: none; }
-  .control-rail, .bottom-dock, .analysis-side { grid-template-columns: 1fr; }
-  .forest-overlay { position: static; width: auto; margin-top: 8px; }
-  .forest-stage { display: flex; flex-direction: column; }
-  .forest-stage .map-panel { order: 0; }
-  .forest-overlay { order: 1; }
+  .game-root { height: clamp(340px, 54vh, 500px); }
+  .dashboard-side { grid-template-columns: 1fr; }
+  .dashboard-side .chart-panel { grid-column: 1; }
+  .dashboard-allocation .allocation-panel { display: block; }
   .carbon-flow { grid-template-columns: repeat(2, 1fr); }
   .strategy-grid { grid-template-columns: 1fr; }
   .strategy-card { min-height: 0; }
@@ -456,4 +446,3 @@ input[type="range"]::-webkit-slider-thumb {
   .species-grid { grid-template-columns: 1fr; }
   .setup-copy h1 { font-size: 50px; }
 }
-

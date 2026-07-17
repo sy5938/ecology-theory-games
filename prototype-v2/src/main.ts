@@ -2,7 +2,7 @@ import Phaser from 'phaser'
 import * as echarts from 'echarts'
 import './style.css'
 import { ForestScene, MAP_PIXEL_HEIGHT, MAP_PIXEL_WIDTH } from './forest-scene'
-import { gameLayout, nextVariant, prototypeSwitcher, setupLayout, type Variant } from './layouts'
+import { gameLayout, setupLayout } from './layouts'
 import { SPECIES, STRATEGIES, type Strategy } from './species'
 import { ForestSimulation, type Allocation, type AllocationKey, type Individual } from './simulation'
 
@@ -21,8 +21,6 @@ interface SelectedSample {
 }
 
 const appRoot = document.querySelector<HTMLDivElement>('#app')!
-const queryVariant = new URLSearchParams(window.location.search).get('variant')?.toUpperCase()
-const variant: Variant = queryVariant === 'B' || queryVariant === 'C' ? queryVariant : 'A'
 
 let selectedStrategy: Strategy = 'sun'
 let selectedCode = 'LORCHI'
@@ -39,10 +37,9 @@ let uiInterval: number | null = null
 let reportShownFor: object | null = null
 
 renderSetup()
-bindVariantKeyboard()
 
 function renderSetup(): void {
-  appRoot.innerHTML = setupLayout(selectedStrategy, selectedCode) + (import.meta.env.DEV ? prototypeSwitcher(variant) : '')
+  appRoot.innerHTML = setupLayout(selectedStrategy, selectedCode)
 
   document.querySelectorAll<HTMLButtonElement>('[data-strategy]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -60,12 +57,11 @@ function renderSetup(): void {
   })
 
   document.querySelector<HTMLButtonElement>('#start-game')!.addEventListener('click', startGame)
-  bindVariantSwitcher()
 }
 
 function startGame(): void {
   const player = SPECIES.find((species) => species.code === selectedCode)!
-  appRoot.innerHTML = gameLayout(variant, player) + (import.meta.env.DEV ? prototypeSwitcher(variant) : '')
+  appRoot.innerHTML = gameLayout(player)
 
   simulation = new ForestSimulation(SPECIES, selectedCode)
   forestScene = new ForestScene(simulation, {
@@ -101,7 +97,6 @@ function startGame(): void {
   })
 
   bindGameControls()
-  bindVariantSwitcher()
   syncAllocationControls(simulation.allocation)
   updateUi()
   updateChart()
@@ -489,28 +484,4 @@ function formatTime(seconds: number): string {
 function restart(): void {
   if (uiInterval !== null) window.clearInterval(uiInterval)
   window.location.reload()
-}
-
-function bindVariantSwitcher(): void {
-  document.querySelectorAll<HTMLButtonElement>('[data-variant-direction]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const direction = button.dataset.variantDirection === 'next' ? 1 : -1
-      navigateToVariant(nextVariant(variant, direction))
-    })
-  })
-}
-
-function bindVariantKeyboard(): void {
-  window.addEventListener('keydown', (event) => {
-    if (!import.meta.env.DEV || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return
-    const target = event.target as HTMLElement | null
-    if (target?.matches('input, textarea, [contenteditable="true"]')) return
-    navigateToVariant(nextVariant(variant, event.key === 'ArrowRight' ? 1 : -1))
-  })
-}
-
-function navigateToVariant(next: Variant): void {
-  const url = new URL(window.location.href)
-  url.searchParams.set('variant', next)
-  window.location.replace(url)
 }

@@ -1,13 +1,5 @@
 import { SPECIES, STRATEGIES, type Species, type Strategy } from './species'
 
-export type Variant = 'A' | 'B' | 'C'
-
-const variantNames: Record<Variant, string> = {
-  A: '投资工作台',
-  B: '森林优先',
-  C: '研究仪表盘',
-}
-
 const header = (player: Species) => `
   <header class="app-header">
     <div>
@@ -134,47 +126,21 @@ const modalsAndTooltip = `
   </div>
 `
 
-export function gameLayout(variant: Variant, player: Species): string {
-  if (variant === 'B') {
-    return `
-      <div class="app-shell layout-b">
-        ${header(player)}
-        <main class="forest-stage">
+export function gameLayout(player: Species): string {
+  return `
+    <div class="app-shell unified-layout">
+      ${header(player)}
+      <main class="dashboard-grid">
+        <div class="dashboard-map-column">
           ${mapPanel}
-          <div class="forest-overlay overlay-overview">${overviewPanel}</div>
-          <div class="forest-overlay overlay-selected">${selectedPanel}</div>
-          <div class="forest-overlay overlay-event">${eventPanel}</div>
-        </main>
-        <aside class="bottom-dock">
-          ${allocationPanel}
+          ${eventPanel}
+        </div>
+        <aside class="dashboard-side">
+          ${overviewPanel}
+          ${selectedPanel}
           ${chartPanel}
         </aside>
-      </div>
-      ${modalsAndTooltip}
-    `
-  }
-
-  if (variant === 'C') {
-    return `
-      <div class="app-shell layout-c">
-        ${header(player)}
-        <main class="analysis-grid">
-          <div class="analysis-map">${mapPanel}</div>
-          <div class="analysis-chart">${chartPanel}</div>
-          <div class="analysis-side">${overviewPanel}${selectedPanel}${eventPanel}</div>
-          <div class="analysis-allocation">${allocationPanel}</div>
-        </main>
-      </div>
-      ${modalsAndTooltip}
-    `
-  }
-
-  return `
-    <div class="app-shell layout-a">
-      ${header(player)}
-      <main class="workbench-grid">
-        <div class="workbench-map">${mapPanel}${eventPanel}</div>
-        <aside class="control-rail">${overviewPanel}${allocationPanel}${selectedPanel}${chartPanel}</aside>
+        <div class="dashboard-allocation">${allocationPanel}</div>
       </main>
     </div>
     ${modalsAndTooltip}
@@ -219,25 +185,8 @@ export function setupLayout(selectedStrategy: Strategy = 'sun', selectedCode = '
         <div class="step-label">02 · 选择你控制的真实物种</div>
         <div class="species-grid" id="species-grid">${speciesCards}</div>
         <button type="button" id="start-game" class="primary-button">进入密闭森林</button>
-        <p class="setup-note">其他 5 个物种由策略规则自动运行；所有个体都可以查看，但不能逐棵操作。</p>
+        <p class="setup-note">约 252 个初始个体；其他 5 个物种由策略规则自动运行。所有个体都可以查看，但不能逐棵操作。</p>
       </section>
     </main>
   `
 }
-
-export function prototypeSwitcher(variant: Variant): string {
-  return `
-    <nav class="prototype-switcher" aria-label="原型布局切换">
-      <button type="button" data-variant-direction="previous" aria-label="上一个布局">←</button>
-      <span>${variant} — ${variantNames[variant]}</span>
-      <button type="button" data-variant-direction="next" aria-label="下一个布局">→</button>
-    </nav>
-  `
-}
-
-export function nextVariant(current: Variant, direction: 1 | -1): Variant {
-  const variants: Variant[] = ['A', 'B', 'C']
-  const currentIndex = variants.indexOf(current)
-  return variants[(currentIndex + direction + variants.length) % variants.length]
-}
-

@@ -64,7 +64,7 @@ const STAGES: Stage[] = ['seed', 'seedling', 'sapling', 'adult']
 const FIXED_STEP_SECONDS = 0.5
 const MAP_WIDTH = 48
 const MAP_HEIGHT = 32
-const MAX_INDIVIDUALS = 520
+const MAX_INDIVIDUALS = 820
 
 class SeededRandom {
   private value: number
@@ -228,8 +228,8 @@ export class ForestSimulation {
 
   private seedClosedCanopyForest(): void {
     for (const species of this.activeSpecies) {
-      for (let index = 0; index < 28; index += 1) {
-        const stage: Stage = index < 9 ? 'adult' : index < 16 ? 'sapling' : index < 24 ? 'seedling' : 'seed'
+      for (let index = 0; index < 42; index += 1) {
+        const stage: Stage = index < 10 ? 'adult' : index < 20 ? 'sapling' : index < 34 ? 'seedling' : 'seed'
         this.individuals.push(this.makeIndividual(species, stage))
       }
     }
