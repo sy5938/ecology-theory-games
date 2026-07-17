@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>光之林 · MVP</title>
+  <style>
+    :root { --ink:#15352b; --muted:#6c8378; --paper:#f5f4ed; --card:#fffdf7; --line:#dbe5dc; --accent:#e96c4c; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+    .wrap { max-width:1240px; margin:0 auto; padding:26px; }
+    header { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:18px; }
+    h1 { margin:0; font-size:32px; letter-spacing:-.04em; }
+    h2 { margin:0 0 8px; font-size:20px; }
+    p { margin:5px 0; color:var(--muted); line-height:1.55; }
+    .eyebrow { color:var(--accent); font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; box-shadow:0 10px 30px #214c3910; }
+    .setup { padding:24px; }
+    .types, .species-grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:12px; margin-top:16px; }
+    .choice { border:1px solid var(--line); background:#fff; border-radius:14px; padding:15px; cursor:pointer; transition:.15s; text-align:left; color:var(--ink); }
+    .choice:hover, .choice.selected { border-color:var(--accent); box-shadow:0 0 0 3px #e96c4c20; transform:translateY(-1px); }
+    .dot { width:12px; height:12px; display:inline-block; border-radius:99px; margin-right:7px; }
+    .choice strong { display:block; font-size:16px; margin-bottom:6px; }
+    .choice small { color:var(--muted); line-height:1.45; }
+    button { border:0; border-radius:12px; padding:11px 15px; background:var(--ink); color:white; font-weight:750; cursor:pointer; }
+    button.secondary { background:#e9eee8; color:var(--ink); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .start-row { display:flex; align-items:center; justify-content:space-between; margin-top:20px; gap:12px; }
+    #game { display:none; }
+    .game-grid { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:16px; align-items:start; }
+    .map-card { padding:14px; }
+    canvas { width:100%; display:block; border-radius:12px; background:#dce8be; }
+    .map-caption { display:flex; justify-content:space-between; align-items:center; padding-top:10px; color:var(--muted); font-size:12px; }
+    .legend { display:flex; gap:12px; flex-wrap:wrap; }
+    .side { display:flex; flex-direction:column; gap:12px; }
+    .panel { padding:16px; }
+    .stat { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px; }
+    .stat:last-child { border-bottom:0; }
+    .stat b { color:var(--ink); }
+    .share { height:16px; display:flex; overflow:hidden; border-radius:99px; background:#e7ece4; margin:12px 0 5px; }
+    .share i { display:block; height:100%; }
+    .actions { display:grid; gap:8px; }
+    .actions button { text-align:left; background:#eef2e9; color:var(--ink); }
+    .actions button:hover { background:#e7eadb; }
+    .actions button span { display:block; font-size:12px; color:var(--muted); margin-top:3px; font-weight:500; }
+    .event { border-left:4px solid var(--accent); background:#fff2eb; padding:10px 12px; border-radius:8px; font-size:13px; }
+    .stage-track { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin:10px 0 4px; }
+    .stage-track div { height:7px; border-radius:5px; background:#dfe7dc; }
+    .stage-track div.on { background:var(--accent); }
+    .log { max-height:115px; overflow:auto; font-size:12px; line-height:1.55; color:var(--muted); }
+    .log div { padding:3px 0; border-bottom:1px solid var(--line); }
+    .modal { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:#15352b88; z-index:5; }
+    .modal-card { max-width:430px; width:calc(100% - 36px); padding:25px; background:var(--card); border-radius:20px; box-shadow:0 24px 80px #15352b55; }
+    .modal-card h2 { font-size:28px; margin:5px 0 8px; }
+    .pulse { animation:pulse .7s ease; }
+    @keyframes pulse { 0%{filter:saturate(1)} 45%{filter:saturate(1.8) brightness(1.08)} 100%{filter:saturate(1)} }
+    .small { font-size:12px; color:var(--muted); }
+    .table { width:100%; border-collapse:collapse; font-size:12px; }
+    .table td { padding:5px 0; border-bottom:1px solid var(--line); }
+    .table td:last-child { text-align:right; font-weight:700; }
+    .hidden { display:none!important; }
+    @media (max-width:850px) { .game-grid { grid-template-columns:1fr; } .types,.species-grid { grid-template-columns:1fr; } header { display:block; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><div class="eyebrow">Ecology theory game · prototype</div><h1>光之林</h1></div>
+    <div class="small">光照 → 生长 → 竞争 → 共存</div>
+  </header>
+
+  <section id="setup" class="card setup">
+    <h2>选择你的策略</h2>
+    <p>你控制一个物种种群。先选策略，再选择真实物种；其他物种由系统自动行动。</p>
+    <div id="typeChoices" class="types"></div>
+    <div id="speciesStep" class="hidden">
+      <h2 style="margin-top:24px">选择代表物种</h2>
+      <div id="speciesChoices" class="species-grid"></div>
+    </div>
+    <div class="start-row"><span id="setupHint" class="small">请选择一个策略类型</span><button id="startBtn" disabled>进入光之林</button></div>
+  </section>
+
+  <section id="game">
+    <div class="game-grid">
+      <div class="card map-card">
+        <canvas id="map" width="900" height="600"></canvas>
+        <div class="map-caption"><span>背景：林下层动态光照（左高 → 右低）</span><span>细网格 · 每 5 格主标尺</span></div>
+        <div id="legend" class="legend" style="margin-top:9px"></div>
+      </div>
+      <aside class="side">
+        <div class="card panel">
+          <div class="eyebrow">Turn <span id="turn">1</span> / 12</div>
+          <h2 id="playerTitle">你的种群</h2>
+          <div id="event" class="event">暂无事件预警</div>
+          <div class="share" id="shareBar"></div>
+          <div class="small" id="shareText"></div>
+          <div class="stage-track" id="stageTrack"></div><div class="small">生活史阶段：种子 · 幼苗 · 幼树 · 成树</div>
+          <div class="stat"><span>存活个体</span><b id="playerCount">—</b></div>
+          <div class="stat"><span>成树数量</span><b id="adultCount">—</b></div>
+          <div class="stat"><span>占据面积</span><b id="area">—</b></div>
+          <div class="stat"><span>最近事件</span><b id="lastEvent">—</b></div>
+        </div>
+        <div class="card panel">
+          <h2>本回合指令</h2>
+          <div class="actions">
+            <button data-action="seed">🌱 种子繁殖<span>成树产种、扩散并尝试建立幼苗</span></button>
+            <button data-action="grow">🌿 生长投资<span>整体成长加速，但本回合种子减少</span></button>
+            <button data-action="hold">🍃 维持策略<span>按基础矩阵自然推进</span></button>
+          </div>
+        </div>
+        <div class="card panel"><h2>群落指标</h2><div id="speciesTable"></div></div>
+        <div class="card panel"><h2>生态过程</h2><div class="log" id="log"></div></div>
+        <div class="card panel"><div class="small">亮度图例</div><div style="height:12px;border-radius:8px;margin-top:7px;background:linear-gradient(90deg,#f1d574,#c7dfac,#83b7a5,#537f93)"></div><div class="small" style="display:flex;justify-content:space-between"><span>高光</span><span>低光</span></div></div>
+      </aside>
+    </div>
+  </section>
+</div>
+<div id="endModal" class="modal hidden"><div class="modal-card"><div class="eyebrow">Ecosystem report</div><h2 id="endTitle">本局结束</h2><p id="endText"></p><div id="endStats" style="margin:16px 0"></div><button onclick="location.reload()">再来一局</button></div></div>
+<script>
+const TYPES = {
+  sun:{name:'喜阳先锋型',desc:'高光下生长快；低光下死亡率高。',color:'#e96c4c'},
+  shade:{name:'喜阴耐受型',desc:'低光下存活高；生长速度较慢。',color:'#6c74bd'},
+  broad:{name:'广适竞争型',desc:'适应范围广；没有极端优势。',color:'#3a9b75'}
+};
+const SPECIES = [
+  {code:'LORCHI',cn:'檵木',type:'sun',max:8}, {code:'MALAPE',cn:'白背叶',type:'sun',max:5}, {code:'SASTZU',cn:'檫木',type:'sun',max:35}, {code:'ZANAIL',cn:'椿叶花椒',type:'sun',max:15},
+  {code:'PHOSHE',cn:'紫楠',type:'shade',max:15}, {code:'MACLEP',cn:'薄叶润楠',type:'shade',max:28}, {code:'SYMLAN',cn:'光叶山矾',type:'shade',max:6}, {code:'EURLOQ',cn:'细枝柃',type:'shade',max:10},
+  {code:'CINCAM',cn:'樟',type:'broad',max:30}, {code:'ILECHI',cn:'冬青',type:'broad',max:13}, {code:'FICERE',cn:'天仙果',type:'broad',max:7}, {code:'TRAFOR',cn:'棕榈',type:'broad',max:10}
+];
+const W=60,H=40, STAGES=['种子','幼苗','幼树','成树'];
+let chosenType=null, playerSpecies=null, species=[], individuals=[], round=1, nextTyphoon=null, lastEvent='—', gameOver=false, transitioning=false, logItems=[];
+const $=s=>document.querySelector(s);
+function renderTypes(){ $('#typeChoices').innerHTML=Object.entries(TYPES).map(([k,t])=>`<button class="choice" data-type="${k}"><strong><i class="dot" style="background:${t.color}"></i>${t.name}</strong><small>${t.desc}</small></button>`).join(''); document.querySelectorAll('[data-type]').forEach(b=>b.onclick=()=>selectType(b.dataset.type)); }
+function selectType(type){ chosenType=type; document.querySelectorAll('[data-type]').forEach(b=>b.classList.toggle('selected',b.dataset.type===type)); $('#speciesStep').classList.remove('hidden'); const list=SPECIES.filter(s=>s.type===type); $('#speciesChoices').innerHTML=list.map(s=>`<button class="choice" data-code="${s.code}"><strong>${s.cn}</strong><small>${TYPES[s.type].name} · 可能高度 ${s.max} m</small></button>`).join(''); document.querySelectorAll('[data-code]').forEach(b=>b.onclick=()=>{playerSpecies=SPECIES.find(s=>s.code===b.dataset.code);document.querySelectorAll('[data-code]').forEach(x=>x.classList.toggle('selected',x.dataset.code===playerSpecies.code));$('#startBtn').disabled=false;$('#setupHint').textContent=`你选择了：${playerSpecies.cn} · ${TYPES[playerSpecies.type].name}`;}); }
+function drawLegend(){ $('#legend').innerHTML=species.map(s=>`<span class="small"><i class="dot" style="background:${TYPES[s.type].color}"></i>${s.cn}${s.code===playerSpecies.code?'（你）':''}</span>`).join(''); }
+function start(){ $('#setup').style.display='none';$('#game').style.display='block'; const selected=[playerSpecies]; const needed=['sun','shade','broad'].filter(t=>!selected.some(s=>s.type===t)); needed.forEach(t=>selected.push(pick(SPECIES.filter(s=>s.type===t)))); const rest=SPECIES.filter(s=>!selected.includes(s)); while(selected.length<6) selected.push(pick(rest.filter(s=>!selected.includes(s)))); species=selected; individuals=[]; species.forEach(s=>{for(let i=0;i<16;i++){const stage=i<2?3:i<6?2:i<11?1:0;individuals.push({id:Math.random(),s,x:Math.random(),y:Math.random(),stage,age:stage===3?8+Math.random()*3:stage===2?4+Math.random()*2:stage===1?1+Math.random():0,h:stage===3?.45+Math.random()*.25:stage===2?.2+Math.random()*.15:stage===1?.05:.02,dbh:stage===3?.15+Math.random()*.1:stage===2?.04:stage===1?.01:.005});}}); drawLegend(); bindActions(); addLog('开局：三个策略类型随机播散，开始接受光照筛选。'); update(); }
+function pick(a){return a[Math.floor(Math.random()*a.length)]}
+function lightAt(x,y){let v=.9-.65*x; for(const p of individuals){if(p.stage===3){const dx=x-p.x,dy=y-p.y,d=Math.sqrt(dx*dx+dy*dy),r=.07+p.h*.035;if(d<r)v-=.55*(1-d/r)*(p.h/p.s.max);}} return Math.max(.04,Math.min(.95,v));}
+function avgLight(s){const ps=individuals.filter(p=>p.s.code===s.code);return ps.length?ps.reduce((a,p)=>a+lightAt(p.x,p.y),0)/ps.length:.5}
+function traitGrowth(s,l){return s.type==='sun'?(.4+.95*l):s.type==='shade'?(1.15-.65*l):(.75+.35*l)}
+function seedFor(s,bonus){const adults=individuals.filter(p=>p.s.code===s.code&&p.stage===3);adults.forEach(p=>{const n=Math.random()<.35+bonus?2:1;for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,d=.025+Math.random()*.12;individuals.push({id:Math.random(),s,x:Math.max(0,Math.min(1,p.x+Math.cos(a)*d)),y:Math.max(0,Math.min(1,p.y+Math.sin(a)*d)),stage:0,age:0,h:.02,dbh:.005});}})}
+function aiAction(s){const l=avgLight(s);return s.type==='sun'?(l>.55?'seed':'grow'):s.type==='shade'?(l<.55?'seed':'hold'):(l>.4?'seed':'grow');}
+function step(action){if(gameOver||transitioning)return;transitioning=true;document.querySelectorAll('.actions button').forEach(b=>b.disabled=true);$('#map').classList.add('pulse');addLog(`第 ${round} 回合：你选择了${action==='seed'?'种子繁殖':action==='grow'?'生长投资':'维持策略'}。`);setTimeout(()=>resolveTurn(action),650);}
+function resolveTurn(action){const before=Object.fromEntries(species.map(s=>[s.code,individuals.filter(p=>p.s.code===s.code).length]));if(action==='seed')seedFor(playerSpecies,.3);if(action==='grow')seedFor(playerSpecies,-.2);species.filter(s=>s.code!==playerSpecies.code).forEach(s=>{const a=aiAction(s);seedFor(s,a==='seed'?.2:a==='grow'?-0.1:0);});
+  for(const p of [...individuals]){const l=lightAt(p.x,p.y),g=traitGrowth(p.s,l)*(action==='grow'&&p.s.code===playerSpecies.code?1.35:1);p.age+=.45*g;if(p.stage===0&&Math.random()<.18*g){p.stage=1;p.h=.05;p.dbh=.01}else if(p.stage===1&&p.age>2&&Math.random()<.18*g){p.stage=2;p.h=.2;p.dbh=.04}else if(p.stage===2&&p.age>4&&Math.random()<.14*g){p.stage=3;p.h=.45;p.dbh=.15}else if(p.stage===3){p.h=Math.min(1,p.h+.018*g);p.dbh=Math.min(1,p.dbh+.008*g)}const badLight=p.s.type==='sun'?l<.2:p.s.type==='shade'?l>.88:false;const local=individuals.filter(q=>q.s.code===p.s.code&&Math.hypot(q.x-p.x,q.y-p.y)<.035).length;const death=(badLight?.12:0)+(local>5?.08*(local-4):0)+(p.stage===0?.04:0);if(Math.random()<death)p.dead=true;}
+  if(nextTyphoon){const e=nextTyphoon;for(const p of individuals){if(p.stage===3&&Math.hypot(p.x-e.x,p.y-e.y)<e.r&&Math.random()<.48)p.dead=true;}lastEvent='台风形成林窗';nextTyphoon=null;addLog('台风：林冠个体倒伏，林窗区域的林下光照升高。');}individuals=individuals.filter(p=>!p.dead);if(round===3||round===7){nextTyphoon={x:.2+Math.random()*.6,y:.18+Math.random()*.64,r:.15};addLog('预警：下一回合将发生局部台风。');}const after=Object.fromEntries(species.map(s=>[s.code,individuals.filter(p=>p.s.code===s.code).length]));const delta=after[playerSpecies.code]-before[playerSpecies.code];addLog(`回合结果：你的种群 ${delta>=0?'+':''}${delta} 个体。`);round++;if(!individuals.some(p=>p.s.code===playerSpecies.code)||round>12)gameOver=true;transitioning=false;$('#map').classList.remove('pulse');update();if(gameOver)showEnd();}
+function addLog(text){logItems.unshift(text);logItems=logItems.slice(0,8);const el=$('#log');if(el)el.innerHTML=logItems.map(x=>`<div>${x}</div>`).join('');}
+function showEnd(){const mine=individuals.filter(p=>p.s.code===playerSpecies.code),total=individuals.length,share=total?mine.length/total*100:0;$('#endTitle').textContent=mine.length?'本局结束 · 你的种群存活':'种群灭绝';$('#endText').textContent=mine.length?'你在 12 回合中维持了种群。现在可以比较数量、成树和空间占据。':'你的种群在环境过滤与竞争中消失了。';$('#endStats').innerHTML=`<div class="stat"><span>最终存活个体</span><b>${mine.length}</b></div><div class="stat"><span>群落占比</span><b>${share.toFixed(1)}%</b></div><div class="stat"><span>群落总个体</span><b>${total}</b></div>`;$('#endModal').classList.remove('hidden');}
+function update(){if(!species.length)return;$('#turn').textContent=Math.min(round,12);const mine=individuals.filter(p=>p.s.code===playerSpecies.code),adults=mine.filter(p=>p.stage===3),total=individuals.length;$('#playerTitle').textContent=`${playerSpecies.cn} · ${TYPES[playerSpecies.type].name}`;$('#playerCount').textContent=mine.length;$('#adultCount').textContent=adults.length;$('#area').textContent=`${new Set(mine.map(p=>Math.floor(p.x*W)+','+Math.floor(p.y*H))).size} 格`;$('#lastEvent').textContent=lastEvent;const pct=total?mine.length/total*100:0;$('#shareText').textContent=`你的存活个体占群落 ${pct.toFixed(1)}% · 成树占比 ${total?(adults.length/total*100).toFixed(1):0}%`;const stages=[0,1,2,3].map(i=>mine.filter(p=>p.stage>=i).length);$('#stageTrack').innerHTML=stages.map((n,i)=>`<div class="${n?'on':''}" title="${STAGES[i]} ${n}"></div>`).join('');$('#shareBar').innerHTML=species.map(s=>{const n=individuals.filter(p=>p.s.code===s.code).length;return`<i style="width:${total?n/total*100:0}%;background:${TYPES[s.type].color}"></i>`}).join('');$('#event').textContent=nextTyphoon?'预警：下一回合局部台风，影响范围已在地图上模糊标示。':(gameOver?(mine.length?'12 回合结束：查看你的群落结果。':'你的种群已灭绝。'):'暂无事件预警');$('#event').style.opacity=nextTyphoon?'1':'.8';$('#speciesTable').innerHTML='<table class="table">'+species.map(s=>{const n=individuals.filter(p=>p.s.code===s.code).length;return`<tr><td><i class="dot" style="background:${TYPES[s.type].color}"></i>${s.cn}</td><td>${n}</td></tr>`}).join('')+'</table>';document.querySelectorAll('.actions button').forEach(b=>b.disabled=gameOver||transitioning);draw();}
+function draw(){const c=$('#map'),ctx=c.getContext('2d'),sx=c.width/W,sy=c.height/H;ctx.clearRect(0,0,c.width,c.height);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const l=lightAt((x+.5)/W,(y+.5)/H);const hue=42+l*155;ctx.fillStyle=`hsl(${hue},${42+l*18}%,${71-l*24}%)`;ctx.fillRect(x*sx,y*sy,sx+1,sy+1);}ctx.strokeStyle='#ffffff22';ctx.lineWidth=1;for(let x=0;x<=W;x++)for(let y=0;y<=H;y++){if(x%5===0||y%5===0){ctx.beginPath();if(x%5===0){ctx.moveTo(x*sx,0);ctx.lineTo(x*sx,c.height)}else{ctx.moveTo(0,y*sy);ctx.lineTo(c.width,y*sy)}ctx.stroke();}}if(nextTyphoon){ctx.fillStyle='#56606b22';ctx.strokeStyle='#59636c99';ctx.setLineDash([8,7]);ctx.beginPath();ctx.arc(nextTyphoon.x*c.width,nextTyphoon.y*c.height,nextTyphoon.r*c.width,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.setLineDash([]);}for(const p of individuals){const x=p.x*c.width,y=p.y*c.height,r=(2+p.h*11)*(p.stage===3?1.2:1);ctx.fillStyle=TYPES[p.s.type].color;ctx.globalAlpha=.25;ctx.beginPath();ctx.arc(x,y,r*1.8,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();if(p.s.code===playerSpecies.code){ctx.strokeStyle='#15352b';ctx.lineWidth=1.5;ctx.stroke();}if(p.stage===3){ctx.strokeStyle='#fff8';ctx.lineWidth=1;ctx.beginPath();ctx.arc(x,y,r+3,0,Math.PI*2);ctx.stroke();}}ctx.globalAlpha=1;}
+function bindActions(){document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>step(b.dataset.action));}
+renderTypes();$('#startBtn').onclick=start;
+</script>
+</body>
+</html>

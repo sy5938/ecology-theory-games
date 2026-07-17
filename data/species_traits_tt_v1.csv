@@ -1,4 +1,13 @@
 species_code,chinese_name,latin_name,strategy_type,environment_category,environment_evidence,max_height_m,light_preference,trait_status,trait_source
-LORCHI,檵木,Loropetalum chinense,喜阳先锋型,丘陵山地/疏林/林缘,向阳丘陵及山地；山地疏林下或路旁,8,喜阳,已核实,https://www.iplant.cn/bk/42D1AA4046AFA583
-PHOSHE,紫楠,Phoebe sheareri,喜阴耐受型,山地阔叶林,山地阔叶林,15,待核实,部分核实,https://zwy.juwp.edu.cn/info/1067/7932.htm
+LORCHI,檵木,Loropetalum chinense,喜阳先锋型,丘陵山地/疏林/林缘,喜向阳丘陵及山地；山地疏林下或路旁,8,喜阳,已核实,https://www.iplant.cn/bk/42D1AA4046AFA583
+MALAPE,白背叶,Mallotus apelta,喜阳先锋型,山坡疏林/灌丛,山地山坡疏林或灌丛,5,喜阳,已核实,https://www.iplant.cn/fsz/info/Mallotus%20apelta
+SASTZU,檫木,Sassafras tzumu,喜阳先锋型,疏林/密林,疏林或密林中,35,喜阳,已核实,https://www.iplant.cn/bk/B85C7732B834798B
+ZANAIL,椿叶花椒,Zanthoxylum ailanthoides,喜阳先锋型,山地/林缘,游戏映射为先锋型；生境字段待补充,15,喜阳,高度已核实/生境待核实,https://www.iplant.cn/bk/B4483C6302297D79
+PHOSHE,紫楠,Phoebe sheareri,喜阴耐受型,山地阔叶林,多生于海拔1000米以下的山地阔叶林中,15,喜阴,策略为游戏映射,https://zwy.juwp.edu.cn/info/1067/7932.htm
+MACLEP,薄叶润楠,Machilus leptophylla,喜阴耐受型,阴坡谷地混交林,阴坡谷地混交林中,28,喜阴,策略为游戏映射,https://www.iplant.cn/bk/0ACEA6E9BDCDB49A
+SYMLAN,光叶山矾,Symplocos lancifolia,喜阴耐受型,山地密林/疏林/水旁,山地密林、疏林或水旁,6,喜阴,策略为游戏映射,https://www.iplant.cn/fsz/info/Symplocos%20lancifolia
+EURLOQ,细枝柃,Eurya loquaiana,喜阴耐受型,山地密林/沟谷/林缘,山地密林、山坡沟谷或林缘,10,喜阴,策略为游戏映射,https://www.iplant.cn/fsz/info/Eurya%20loquaiana
 CINCAM,樟,Cinnamomum camphora,广适竞争型,山坡/沟谷/人类干扰地,山坡或沟谷；村落及路旁常见栽培,30,广适,已核实,https://www.iplant.cn/fsz/info/Cinnamomum%20camphora
+ILECHI,冬青,Ilex chinensis,广适竞争型,常绿阔叶林/林缘,山坡常绿阔叶林中和林缘,13,广适,已核实,https://www.iplant.cn/bk/3F811EA55177E2B0
+FICERE,天仙果,Ficus erecta,广适竞争型,山坡林下/溪边,山坡林下或溪边,7,广适,已核实,https://www.iplant.cn/bk/F817C993DD68BE88
+TRAFOR,棕榈,Trachycarpus fortunei,广适竞争型,疏林/人类干扰地,通常栽培于四旁，罕见野生于疏林,10,广适,已核实,https://www.iplant.cn/bk/090E81BB94B685F1
