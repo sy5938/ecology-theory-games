@@ -20,6 +20,12 @@ interface SelectedSample {
   health: number
 }
 
+const ALLOCATION_PRESETS: Record<string, Allocation> = {
+  canopy: { growth: 0.7, reproduction: 0.2, reserve: 0.1 },
+  spread: { growth: 0.2, reproduction: 0.65, reserve: 0.15 },
+  survive: { growth: 0.2, reproduction: 0.2, reserve: 0.6 },
+}
+
 const appRoot = document.querySelector<HTMLDivElement>('#app')!
 
 let selectedStrategy: Strategy = 'sun'
@@ -79,6 +85,13 @@ function startGame(): void {
       lastSelectedSampleAt = -1
       updateSelectedPanel()
     },
+    onTransplant: (id) => {
+      selection = { type: 'individual', id }
+      selectedSamples = []
+      lastSelectedSampleAt = -1
+      updateSelectedPanel()
+      updateEventPanel()
+    },
   })
 
   game = new Phaser.Game({
@@ -91,7 +104,6 @@ function startGame(): void {
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene: forestScene,
   })
-
   chart = echarts.init(document.querySelector<HTMLDivElement>('#population-chart')!, undefined, {
     renderer: 'canvas',
   })
@@ -135,6 +147,17 @@ function bindGameControls(): void {
 
   document.querySelectorAll<HTMLInputElement>('[data-allocation]').forEach((slider) => {
     slider.addEventListener('input', () => rebalance(slider.dataset.allocation as AllocationKey, Number(slider.value)))
+  })
+
+  document.querySelectorAll<HTMLButtonElement>('[data-allocation-preset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!simulation) return
+      const preset = ALLOCATION_PRESETS[button.dataset.allocationPreset ?? '']
+      if (!preset) return
+      simulation.setAllocation(preset)
+      syncAllocationControls(simulation.allocation)
+      updateUi()
+    })
   })
 
   document.querySelectorAll<HTMLButtonElement>('[data-chart]').forEach((button) => {
@@ -207,6 +230,18 @@ function syncAllocationControls(allocation: Allocation): void {
   const total = values.growth + values.reproduction + values.reserve
   const totalOutput = document.querySelector<HTMLElement>('#allocation-total')
   if (totalOutput) totalOutput.textContent = `${total}%`
+
+  document.querySelectorAll<HTMLButtonElement>('[data-allocation-preset]').forEach((button) => {
+    const preset = ALLOCATION_PRESETS[button.dataset.allocationPreset ?? '']
+    const isActive =
+      preset !== undefined &&
+      Math.abs(preset.growth - allocation.growth) +
+        Math.abs(preset.reproduction - allocation.reproduction) +
+        Math.abs(preset.reserve - allocation.reserve) <
+        0.03
+    button.classList.toggle('active', isActive)
+    button.setAttribute('aria-pressed', String(isActive))
+  })
 }
 
 function updateUi(): void {
@@ -231,6 +266,15 @@ function updateUi(): void {
   setText('maintenance-cost', simulation.playerState.maintenance.toFixed(1))
   setText('carbon-surplus', simulation.playerState.surplus.toFixed(1))
   setText('carbon-reserve', simulation.playerState.reserve.toFixed(1))
+  setText('growth-spend', `投入 ${(simulation.playerState.surplus * simulation.allocation.growth).toFixed(1)}`)
+  setText('reproduction-spend', `投入 ${(simulation.playerState.surplus * simulation.allocation.reproduction).toFixed(1)}`)
+  setText('reserve-spend', `存入 ${(simulation.playerState.surplus * simulation.allocation.reserve).toFixed(1)}`)
+  setText(
+    'allocation-impact',
+    simulation.playerState.surplus > 0.05
+      ? `本期可投资 ${simulation.playerState.surplus.toFixed(1)} · 调整在下一生态步生效`
+      : '收入只能覆盖维持，先争取更好的光照',
+  )
   setText('map-summary', `${canopyCount} 棵林冠树 · 平均林下光照 ${Math.round(averageLight * 100)}%`)
   setText('pause-button', simulation.paused && !simulation.report ? '继续' : '暂停')
 
@@ -286,7 +330,7 @@ function updateSelectedPanel(): void {
   if (!selection) {
     title.textContent = '点击一个个体或空地'
     content.className = 'selected-content empty'
-    content.textContent = '地图点位不接受微操，只提供做投资判断所需的局部信息。'
+    content.textContent = '点击检查状态；自己的幼苗和幼树可以拖到空旷位置，每株限一次。'
     return
   }
 
@@ -326,8 +370,18 @@ function updateSelectedPanel(): void {
       ['局部光照', `${Math.round(simulation.lightAt(individual.x, individual.y) * 100)}%`],
       ['健康', `${Math.round(individual.health * 100)}%`],
       ['林冠个体', individual.canopy ? '是' : '否'],
+      [
+        '移栽',
+        own
+          ? simulation.canTransplant(individual)
+            ? '可拖动 · 限一次'
+            : individual.transplanted
+              ? '已使用'
+              : '当前阶段不可移栽'
+          : '不可操作',
+      ],
     ])}
-    <p class="inspection-note">${own ? '可通过种群投资组合间接影响它。' : '可观察，但不能调整这个物种。'}</p>
+    <p class="inspection-note">${own ? '生命史策略影响整个种群；幼苗/幼树可直接拖动移栽。' : '可观察，但不能调整这个物种。'}</p>
   `
 }
 
@@ -452,7 +506,8 @@ function showHoverTooltip(individual: Individual | null, screenX = 0, screenY = 
     tooltip.classList.add('hidden')
     return
   }
-  tooltip.innerHTML = `<strong>${individual.species.name}</strong><span>${simulation.stageLabel(individual.stage)} · ${individual.height.toFixed(1)} m · 光照 ${Math.round(simulation.lightAt(individual.x, individual.y) * 100)}%</span>`
+  const transplantHint = simulation.canTransplant(individual) ? ' · 可拖动移栽' : ''
+  tooltip.innerHTML = `<strong>${individual.species.name}</strong><span>${simulation.stageLabel(individual.stage)} · ${individual.height.toFixed(1)} m · 光照 ${Math.round(simulation.lightAt(individual.x, individual.y) * 100)}%${transplantHint}</span>`
   tooltip.style.left = `${Math.min(window.innerWidth - 230, screenX + 18)}px`
   tooltip.style.top = `${Math.min(window.innerHeight - 80, screenY + 18)}px`
   tooltip.classList.remove('hidden')

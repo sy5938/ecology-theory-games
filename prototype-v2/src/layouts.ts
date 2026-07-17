@@ -24,11 +24,14 @@ const mapPanel = `
   <section class="map-panel surface">
     <div class="panel-heading map-heading">
       <div><span class="label">林下光照地图</span><strong id="map-summary">密闭林冠正在筛选个体</strong></div>
-      <div class="legend" aria-label="地图图例">
-        <span><i class="legend-own"></i>自己</span>
-        <span><i style="--legend:#e9933e"></i>喜阳</span>
-        <span><i style="--legend:#627bb6"></i>喜阴</span>
-        <span><i style="--legend:#4e9a70"></i>广适</span>
+      <div class="map-guides">
+        <span class="transplant-hint">拖动自己的幼苗/幼树移栽</span>
+        <div class="legend" aria-label="地图图例">
+          <span><i class="legend-own"></i>自己</span>
+          <span><i style="--legend:#e9933e"></i>喜阳</span>
+          <span><i style="--legend:#627bb6"></i>喜阴</span>
+          <span><i style="--legend:#4e9a70"></i>广适</span>
+        </div>
       </div>
     </div>
     <div id="game-root" class="game-root"></div>
@@ -37,25 +40,32 @@ const mapPanel = `
 `
 
 const allocationPanel = `
-  <section class="allocation-panel surface">
+  <section class="allocation-panel allocation-dock surface">
     <div class="panel-heading">
-      <div><span class="label">生命史投资组合</span><strong>持续生效，随时重新平衡</strong></div>
-      <span class="allocation-total" id="allocation-total">100%</span>
+      <div><span class="label">你的生命史策略</span><strong id="allocation-impact">等待第一个生态时间步</strong></div>
+      <div class="allocation-tools">
+        <div class="allocation-presets" aria-label="快速策略">
+          <button type="button" data-allocation-preset="canopy">抢占林冠</button>
+          <button type="button" data-allocation-preset="spread">扩散下一代</button>
+          <button type="button" data-allocation-preset="survive">稳健生存</button>
+        </div>
+        <span class="allocation-total" id="allocation-total">100%</span>
+      </div>
     </div>
     <div class="allocation-row growth">
       <label for="growth-slider"><span>生长</span><strong id="growth-value">40%</strong></label>
       <input id="growth-slider" data-allocation="growth" type="range" min="0" max="100" step="1" />
-      <small>争夺高度与林冠，回报依赖当前光照。</small>
+      <small><span>争夺高度与林冠</span><b id="growth-spend">投入 0.0</b></small>
     </div>
     <div class="allocation-row reproduction">
       <label for="reproduction-slider"><span>繁殖</span><strong id="reproduction-value">30%</strong></label>
       <input id="reproduction-slider" data-allocation="reproduction" type="range" min="0" max="100" step="1" />
-      <small>成树产种，扩散与建立由物种策略自动完成。</small>
+      <small><span>成树产种并自动扩散</span><b id="reproduction-spend">投入 0.0</b></small>
     </div>
     <div class="allocation-row reserve">
       <label for="reserve-slider"><span>储备</span><strong id="reserve-value">30%</strong></label>
       <input id="reserve-slider" data-allocation="reserve" type="range" min="0" max="100" step="1" />
-      <small>牺牲短期增长，缓冲低光与扰动后的收入缺口。</small>
+      <small><span>缓冲低光与扰动</span><b id="reserve-spend">存入 0.0</b></small>
     </div>
     <div class="carbon-flow">
       <div><span>碳收入</span><strong id="carbon-income">0.0</strong></div>
@@ -84,7 +94,7 @@ const selectedPanel = `
   <section class="selected-panel surface">
     <div class="panel-heading"><div><span class="label">地图检查</span><strong id="selected-title">点击一个个体或空地</strong></div></div>
     <div id="selected-content" class="selected-content empty">
-      地图点位不接受微操，只提供做投资判断所需的局部信息。
+      点击检查状态；自己的幼苗和幼树可以拖到空旷位置，每株限一次。
     </div>
   </section>
 `
@@ -130,6 +140,7 @@ export function gameLayout(player: Species): string {
   return `
     <div class="app-shell unified-layout">
       ${header(player)}
+      ${allocationPanel}
       <main class="dashboard-grid">
         <div class="dashboard-map-column">
           ${mapPanel}
@@ -140,7 +151,6 @@ export function gameLayout(player: Species): string {
           ${selectedPanel}
           ${chartPanel}
         </aside>
-        <div class="dashboard-allocation">${allocationPanel}</div>
       </main>
     </div>
     ${modalsAndTooltip}
@@ -185,7 +195,7 @@ export function setupLayout(selectedStrategy: Strategy = 'sun', selectedCode = '
         <div class="step-label">02 · 选择你控制的真实物种</div>
         <div class="species-grid" id="species-grid">${speciesCards}</div>
         <button type="button" id="start-game" class="primary-button">进入密闭森林</button>
-        <p class="setup-note">约 252 个初始个体；其他 5 个物种由策略规则自动运行。所有个体都可以查看，但不能逐棵操作。</p>
+        <p class="setup-note">约 252 个初始个体；其他 5 个物种自动运行。你可以拖动自己的幼苗和幼树进行一次移栽。</p>
       </section>
     </main>
   `

@@ -20,6 +20,12 @@ export interface Individual {
   dbh: number
   health: number
   canopy: boolean
+  transplanted: boolean
+}
+
+export interface TransplantResult {
+  ok: boolean
+  message: string
 }
 
 interface SpeciesState {
@@ -188,6 +194,45 @@ export class ForestSimulation {
     return this.individuals.find((individual) => individual.id === id)
   }
 
+  canTransplant(individual: Individual): boolean {
+    return (
+      individual.species.code === this.playerCode &&
+      (individual.stage === 'seedling' || individual.stage === 'sapling') &&
+      !individual.transplanted
+    )
+  }
+
+  transplant(id: number, x: number, y: number): TransplantResult {
+    const individual = this.findIndividual(id)
+    if (!individual || !this.canTransplant(individual)) {
+      const result = { ok: false, message: '只能移栽自己的幼苗或幼树，且每株只能移动一次。' }
+      this.addEvent(result.message, 'warning')
+      return result
+    }
+
+    const nextX = Math.max(0.015, Math.min(0.985, x))
+    const nextY = Math.max(0.02, Math.min(0.98, y))
+    const occupied = this.individuals.some(
+      (other) => other.id !== id && Math.hypot(other.x - nextX, other.y - nextY) < 0.012,
+    )
+    if (occupied) {
+      const result = { ok: false, message: '落点过于拥挤，请选择更空旷的位置。' }
+      this.addEvent(result.message, 'warning')
+      return result
+    }
+
+    const oldLight = this.lightAt(individual.x, individual.y)
+    individual.x = nextX
+    individual.y = nextY
+    individual.transplanted = true
+    individual.health = Math.max(0.35, individual.health - 0.04)
+    const newLight = this.lightAt(nextX, nextY)
+    const message = `移栽 ${individual.species.name}：光照 ${Math.round(oldLight * 100)}% → ${Math.round(newLight * 100)}%，健康付出 4%。`
+    this.addEvent(message, newLight >= oldLight ? 'good' : 'neutral')
+    this.revision += 1
+    return { ok: true, message }
+  }
+
   continueAfterReport(): void {
     if (this.report?.terminal) return
     this.report = null
@@ -261,8 +306,9 @@ export class ForestSimulation {
       ageYears: this.random.between(minAge, maxAge),
       height,
       dbh: stageIndex === 0 ? 0 : Math.max(0.2, height * this.random.between(1.25, 2.05)),
-      health: this.random.between(0.72, 1),
+      health: this.random.between(0.82, 1),
       canopy: false,
+      transplanted: false,
     }
   }
 
@@ -347,7 +393,7 @@ export class ForestSimulation {
     }, 0) * monthFactor
 
     state.maintenance = population.reduce(
-      (sum, individual) => sum + { seed: 0.006, seedling: 0.055, sapling: 0.2, adult: 0.52 }[individual.stage],
+      (sum, individual) => sum + { seed: 0.003, seedling: 0.028, sapling: 0.115, adult: 0.28 }[individual.stage],
       0,
     ) * monthFactor
 
@@ -373,7 +419,7 @@ export class ForestSimulation {
         const light = this.lightAt(individual.x, individual.y)
         const response = this.lightResponse(state.species.strategy, light)
         const stageBoost = individual.stage === 'adult' ? 0.28 : individual.stage === 'sapling' ? 0.75 : 1
-        const heightGain = perIndividual * state.species.maxHeight * 0.015 * response * stageBoost
+        const heightGain = perIndividual * state.species.maxHeight * 0.028 * response * stageBoost
         individual.height = Math.min(state.species.maxHeight, individual.height + heightGain)
         individual.dbh += heightGain * 1.55
       }
@@ -396,13 +442,13 @@ export class ForestSimulation {
 
     if (shortageRatio > 0) {
       for (const individual of population) {
-        individual.health -= shortageRatio * (individual.stage === 'adult' ? 0.045 : 0.075)
+        individual.health -= shortageRatio * (individual.stage === 'adult' ? 0.03 : 0.05)
       }
-    } else if (state.reserve > Math.max(8, population.length * 0.35)) {
+    } else if (state.reserve > Math.max(5, population.length * 0.18)) {
       const damaged = population.filter((individual) => individual.health < 0.96)
-      const repairCost = Math.min(state.reserve, damaged.length * 0.012)
+      const repairCost = Math.min(state.reserve, damaged.length * 0.016)
       state.reserve -= repairCost
-      for (const individual of damaged) individual.health = Math.min(1, individual.health + 0.012)
+      for (const individual of damaged) individual.health = Math.min(1, individual.health + 0.016)
     }
   }
 
@@ -424,7 +470,7 @@ export class ForestSimulation {
           individual.stage = 'seedling'
           individual.height = 0.08
           individual.dbh = 0.2
-          individual.health = 0.72
+          individual.health = 0.82
         } else if (individual.ageYears > 4 || this.random.next() < 0.012 * monthFactor) {
           individual.health = 0
         }
@@ -439,17 +485,17 @@ export class ForestSimulation {
       }
 
       const strategy = individual.species.strategy
-      if (strategy === 'sun' && light < 0.3) individual.health -= (0.022 + (0.3 - light) * 0.075) * monthFactor
-      if (strategy === 'shade' && light > 0.9) individual.health -= 0.008 * monthFactor
-      if (strategy === 'broad' && light < 0.11) individual.health -= 0.012 * monthFactor
+      if (strategy === 'sun' && light < 0.23) individual.health -= (0.006 + (0.23 - light) * 0.032) * monthFactor
+      if (strategy === 'shade' && light > 0.92) individual.health -= 0.004 * monthFactor
+      if (strategy === 'broad' && light < 0.09) individual.health -= 0.006 * monthFactor
 
-      if (sameSpeciesNeighbors > 4) {
-        const vulnerability = individual.stage === 'seedling' ? 1.5 : individual.stage === 'sapling' ? 1 : 0.55
-        individual.health -= (sameSpeciesNeighbors - 4) * 0.006 * vulnerability * monthFactor
+      if (sameSpeciesNeighbors > 6) {
+        const vulnerability = individual.stage === 'seedling' ? 1.25 : individual.stage === 'sapling' ? 0.8 : 0.4
+        individual.health -= (sameSpeciesNeighbors - 6) * 0.0015 * vulnerability * monthFactor
       }
 
       if (individual.ageYears > 95 && this.random.next() < 0.008 * monthFactor) individual.health = 0
-      if (individual.stage === 'adult' && this.random.next() < 0.00045 * monthFactor) individual.health = 0
+      if (individual.stage === 'adult' && this.random.next() < 0.00025 * monthFactor) individual.health = 0
     }
   }
 

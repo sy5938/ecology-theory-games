@@ -1,11 +1,12 @@
 import Phaser from 'phaser'
 import { STRATEGIES } from './species'
-import { ForestSimulation, type Individual } from './simulation'
+import { ForestSimulation, type Individual, type TransplantResult } from './simulation'
 
 export interface ForestSceneCallbacks {
   onHover: (individual: Individual | null, screenX?: number, screenY?: number) => void
   onSelectIndividual: (id: number) => void
   onSelectCell: (x: number, y: number, light: number) => void
+  onTransplant: (id: number, result: TransplantResult) => void
 }
 
 export const MAP_PIXEL_WIDTH = 960
@@ -20,6 +21,7 @@ export class ForestScene extends Phaser.Scene {
   private warningLayer!: Phaser.GameObjects.Graphics
   private selectedId: number | null = null
   private renderedRevision = -1
+  private dragOrigin: { id: number; x: number; y: number; wasPaused: boolean } | null = null
 
   constructor(simulation: ForestSimulation, callbacks: ForestSceneCallbacks) {
     super('forest')
@@ -81,6 +83,9 @@ export class ForestScene extends Phaser.Scene {
       circle.setRadius(radius)
       circle.setDisplaySize(radius * 2, radius * 2)
       circle.setAlpha(this.alphaFor(individual))
+      const draggable = this.simulation.canTransplant(individual)
+      this.input.setDraggable(circle, draggable)
+      if (circle.input) circle.input.cursor = draggable ? 'grab' : 'pointer'
     }
     this.refreshCircleStyles()
   }
@@ -111,6 +116,40 @@ export class ForestScene extends Phaser.Scene {
       this.selectedId = individual.id
       this.refreshCircleStyles()
       this.callbacks.onSelectIndividual(individual.id)
+    })
+    circle.on('dragstart', () => {
+      const current = this.simulation.findIndividual(individual.id)
+      if (!current || !this.simulation.canTransplant(current)) return
+      this.dragOrigin = {
+        id: current.id,
+        x: current.x,
+        y: current.y,
+        wasPaused: this.simulation.paused,
+      }
+      this.simulation.paused = true
+      circle?.setScale(1.18)
+      circle?.setAlpha(1)
+    })
+    circle.on('drag', (_pointer: Phaser.Input.Pointer, dragX: number, dragY: number) => {
+      if (this.dragOrigin?.id !== individual.id) return
+      circle?.setPosition(
+        Phaser.Math.Clamp(dragX, MAP_PIXEL_WIDTH * 0.015, MAP_PIXEL_WIDTH * 0.985),
+        Phaser.Math.Clamp(dragY, MAP_PIXEL_HEIGHT * 0.02, MAP_PIXEL_HEIGHT * 0.98),
+      )
+    })
+    circle.on('dragend', () => {
+      if (this.dragOrigin?.id !== individual.id || !circle) return
+      const origin = this.dragOrigin
+      const result = this.simulation.transplant(
+        individual.id,
+        circle.x / MAP_PIXEL_WIDTH,
+        circle.y / MAP_PIXEL_HEIGHT,
+      )
+      this.simulation.paused = origin.wasPaused
+      this.dragOrigin = null
+      circle.setScale(1)
+      if (!result.ok) circle.setPosition(origin.x * MAP_PIXEL_WIDTH, origin.y * MAP_PIXEL_HEIGHT)
+      this.callbacks.onTransplant(individual.id, result)
     })
     return circle
   }
@@ -179,7 +218,7 @@ export class ForestScene extends Phaser.Scene {
 
   private radiusFor(individual: Individual): number {
     if (individual.stage === 'seed') return 2.1
-    if (individual.stage === 'seedling') return 3.8
+    if (individual.stage === 'seedling') return individual.species.code === this.simulation.playerCode ? 5 : 3.8
     if (individual.stage === 'sapling') return 5.2 + (individual.height / individual.species.maxHeight) * 3
     return 7 + (individual.height / individual.species.maxHeight) * 5.5
   }
@@ -200,4 +239,3 @@ export class ForestScene extends Phaser.Scene {
     return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]
   }
 }
-
