@@ -9,6 +9,7 @@ const header = (player: Species) => `
     </div>
     <div class="header-actions">
       <div class="clock"><span id="game-time">00:00</span><small id="forest-year">第 0.0 年</small></div>
+      <button class="quiet-button report-button" id="report-button" type="button">阶段报告</button>
       <button class="quiet-button" id="pause-button" type="button">暂停</button>
       <div class="speed-group" aria-label="演化速度">
         <button type="button" data-speed="1" class="active">1×</button>
@@ -25,7 +26,7 @@ const mapPanel = `
     <div class="panel-heading map-heading">
       <div><span class="label">林下光照地图</span><strong id="map-summary">密闭林冠正在筛选个体</strong></div>
       <div class="map-guides">
-        <span class="transplant-hint">拖动自己的幼苗/幼树移栽</span>
+        <span class="transplant-hint">拖动移栽 · Shift / ⌘ 多选</span>
         <div class="legend" aria-label="地图图例">
           <span><i class="legend-own"></i>自己</span>
           <span><i style="--legend:#e9933e"></i>喜阳</span>
@@ -94,7 +95,7 @@ const selectedPanel = `
   <section class="selected-panel surface">
     <div class="panel-heading"><div><span class="label">地图检查</span><strong id="selected-title">点击一个个体或空地</strong></div></div>
     <div id="selected-content" class="selected-content empty">
-      点击检查状态；自己的幼苗和幼树可以拖到空旷位置，每株限一次。
+      点击检查状态；Shift / ⌘ 可多选，自己的幼苗和幼树可拖动移栽。
     </div>
   </section>
 `
@@ -106,7 +107,7 @@ const chartPanel = `
       <div class="chart-tabs">
         <button type="button" data-chart="trend" class="active">走势</button>
         <button type="button" data-chart="height">树高分布</button>
-        <button type="button" data-chart="selected">选中个体</button>
+        <button type="button" data-chart="selected">选中对象</button>
       </div>
     </div>
     <div id="population-chart" class="population-chart"></div>
@@ -123,11 +124,21 @@ const eventPanel = `
 const modalsAndTooltip = `
   <div id="hover-tooltip" class="hover-tooltip hidden"></div>
   <div id="report-modal" class="modal hidden" role="dialog" aria-modal="true">
-    <div class="modal-card">
-      <div class="eyebrow">三分钟群落结局检查点</div>
+    <div class="modal-card report-card">
+      <div class="eyebrow" id="report-kicker">三分钟群落结局检查点</div>
       <h2 id="report-title">群落结局</h2>
       <p id="report-summary"></p>
-      <ul id="report-details"></ul>
+      <div id="report-chart" class="report-chart"></div>
+      <div class="report-columns">
+        <section>
+          <h3>阶段指标</h3>
+          <ul id="report-details"></ul>
+        </section>
+        <section>
+          <h3>最近发生</h3>
+          <ol id="report-events"></ol>
+        </section>
+      </div>
       <div class="modal-actions">
         <button id="continue-button" type="button">继续演化</button>
         <button id="modal-restart-button" type="button" class="quiet-button">重新开始</button>
@@ -195,7 +206,7 @@ export function setupLayout(selectedStrategy: Strategy = 'sun', selectedCode = '
         <div class="step-label">02 · 选择你控制的真实物种</div>
         <div class="species-grid" id="species-grid">${speciesCards}</div>
         <button type="button" id="start-game" class="primary-button">进入密闭森林</button>
-        <p class="setup-note">约 252 个初始个体；其他 5 个物种自动运行。你可以拖动自己的幼苗和幼树进行一次移栽。</p>
+        <p class="setup-note">约 252 个初始个体；其他 5 个物种自动运行。可拖动移栽，或用 Shift / ⌘ 多选观察一组个体。</p>
       </section>
     </main>
   `

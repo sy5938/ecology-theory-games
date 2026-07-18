@@ -21,6 +21,7 @@ export interface Individual {
   health: number
   canopy: boolean
   transplanted: boolean
+  pathogenPressure: number
 }
 
 export interface TransplantResult {
@@ -38,7 +39,10 @@ interface SpeciesState {
   reproductionCredit: number
 }
 
+export type DisturbanceType = 'typhoon' | 'rainstorm'
+
 export interface DisturbanceWarning {
+  type: DisturbanceType
   x: number
   y: number
   radius: number
@@ -51,6 +55,11 @@ export interface HistorySample {
   adults: number
   reserve: number
   income: number
+  averageHeight: number
+  averageHealth: number
+  averageLight: number
+  averagePathogenPressure: number
+  canopy: number
 }
 
 export interface EventEntry {
@@ -71,6 +80,8 @@ const FIXED_STEP_SECONDS = 0.5
 const MAP_WIDTH = 48
 const MAP_HEIGHT = 32
 const MAX_INDIVIDUALS = 820
+export const CANOPY_HEIGHT_METERS = 10
+const DENSITY_RADIUS = 0.05
 
 class SeededRandom {
   private value: number
@@ -112,6 +123,7 @@ export class ForestSimulation {
   speed = 1
   paused = false
   revision = 0
+  lightRevision = 0
 
   private readonly random: SeededRandom
   private nextId = 1
@@ -245,6 +257,14 @@ export class ForestSimulation {
     return { seed: '种子', seedling: '幼苗', sapling: '幼树', adult: '成树' }[stage]
   }
 
+  createOutcomeReport(): OutcomeReport {
+    return this.buildOutcomeReport()
+  }
+
+  lightHealthEffectAt(individual: Individual): number {
+    return this.lightHealthEffect(individual.species.strategy, this.lightAt(individual.x, individual.y))
+  }
+
   private chooseSpecies(allSpecies: Species[], playerCode: string): Species[] {
     const player = allSpecies.find((species) => species.code === playerCode) ?? allSpecies[0]
     const selected = [player]
@@ -309,14 +329,15 @@ export class ForestSimulation {
       health: this.random.between(0.82, 1),
       canopy: false,
       transplanted: false,
+      pathogenPressure: 0,
     }
   }
 
   private step(deltaSeconds: number): void {
     this.timeSeconds += deltaSeconds
     this.updateWarningAndDisturbance()
+    this.individuals = this.individuals.filter((individual) => individual.health > 0)
     this.updateAiAllocations()
-    this.recalculateCanopyAndLight()
 
     for (const state of this.states.values()) {
       this.applyBudgetAndGrowth(state, deltaSeconds)
@@ -454,24 +475,25 @@ export class ForestSimulation {
 
   private applyEstablishmentAndMortality(deltaSeconds: number): void {
     const monthFactor = deltaSeconds / FIXED_STEP_SECONDS
+    const densityIndex = this.buildDensityIndex()
     for (const individual of this.individuals) {
       individual.ageYears += monthFactor / 12
       const light = this.lightAt(individual.x, individual.y)
-      const sameSpeciesNeighbors = this.individuals.filter(
-        (other) =>
-          other.id !== individual.id &&
-          other.species.code === individual.species.code &&
-          Math.hypot(other.x - individual.x, other.y - individual.y) < 0.042,
-      ).length
+      const sameSpeciesNeighbors = this.countSameSpeciesNeighbors(individual, densityIndex)
+      individual.pathogenPressure = Math.max(0, Math.min(1, (sameSpeciesNeighbors - 5) / 8))
 
       if (individual.stage === 'seed') {
-        const establish = this.establishmentChance(individual.species.strategy, light)
+        const establish =
+          this.establishmentChance(individual.species.strategy, light) * (1 - individual.pathogenPressure * 0.65)
         if (this.random.next() < establish * monthFactor) {
           individual.stage = 'seedling'
           individual.height = 0.08
           individual.dbh = 0.2
           individual.health = 0.82
-        } else if (individual.ageYears > 4 || this.random.next() < 0.012 * monthFactor) {
+        } else if (
+          individual.ageYears > 4 ||
+          this.random.next() < (0.012 + individual.pathogenPressure * 0.018) * monthFactor
+        ) {
           individual.health = 0
         }
         continue
@@ -484,87 +506,151 @@ export class ForestSimulation {
         individual.stage = 'adult'
       }
 
-      const strategy = individual.species.strategy
-      if (strategy === 'sun' && light < 0.23) individual.health -= (0.006 + (0.23 - light) * 0.032) * monthFactor
-      if (strategy === 'shade' && light > 0.92) individual.health -= 0.004 * monthFactor
-      if (strategy === 'broad' && light < 0.09) individual.health -= 0.006 * monthFactor
+      individual.health = Math.min(
+        1,
+        individual.health + this.lightHealthEffect(individual.species.strategy, light) * monthFactor,
+      )
 
-      if (sameSpeciesNeighbors > 6) {
-        const vulnerability = individual.stage === 'seedling' ? 1.25 : individual.stage === 'sapling' ? 0.8 : 0.4
-        individual.health -= (sameSpeciesNeighbors - 6) * 0.0015 * vulnerability * monthFactor
-      }
+      const pathogenVulnerability =
+        individual.stage === 'seedling' ? 0.007 : individual.stage === 'sapling' ? 0.0045 : 0.002
+      individual.health -= individual.pathogenPressure * pathogenVulnerability * monthFactor
 
       if (individual.ageYears > 95 && this.random.next() < 0.008 * monthFactor) individual.health = 0
       if (individual.stage === 'adult' && this.random.next() < 0.00025 * monthFactor) individual.health = 0
     }
   }
 
-  private recalculateCanopyAndLight(): void {
-    const adults = this.individuals.filter((individual) => individual.stage === 'adult')
-    for (const individual of this.individuals) individual.canopy = false
-    for (const individual of adults) {
-      const blocked = adults.some(
-        (other) =>
-          other.id !== individual.id &&
-          other.height > individual.height * 1.06 &&
-          Math.hypot(other.x - individual.x, other.y - individual.y) < 0.085,
-      )
-      individual.canopy = !blocked
+  private buildDensityIndex(): Map<string, Individual[]> {
+    const index = new Map<string, Individual[]>()
+    for (const individual of this.individuals) {
+      const cellX = Math.floor(individual.x / DENSITY_RADIUS)
+      const cellY = Math.floor(individual.y / DENSITY_RADIUS)
+      const key = `${individual.species.code}:${cellX}:${cellY}`
+      const bucket = index.get(key)
+      if (bucket) bucket.push(individual)
+      else index.set(key, [individual])
     }
+    return index
+  }
 
-    const canopy = adults.filter((individual) => individual.canopy)
+  private countSameSpeciesNeighbors(individual: Individual, index: Map<string, Individual[]>): number {
+    const cellX = Math.floor(individual.x / DENSITY_RADIUS)
+    const cellY = Math.floor(individual.y / DENSITY_RADIUS)
+    let neighbors = 0
+    for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+      for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+        const bucket = index.get(`${individual.species.code}:${cellX + offsetX}:${cellY + offsetY}`)
+        if (!bucket) continue
+        for (const other of bucket) {
+          if (
+            other.id !== individual.id &&
+            Math.hypot(other.x - individual.x, other.y - individual.y) < DENSITY_RADIUS
+          ) {
+            neighbors += 1
+          }
+        }
+      }
+    }
+    return neighbors
+  }
+
+  private recalculateCanopyAndLight(): void {
+    for (const individual of this.individuals) individual.canopy = individual.height >= CANOPY_HEIGHT_METERS
+
     for (let gy = 0; gy < MAP_HEIGHT; gy += 1) {
       for (let gx = 0; gx < MAP_WIDTH; gx += 1) {
         const x = (gx + 0.5) / MAP_WIDTH
-        const y = (gy + 0.5) / MAP_HEIGHT
-        let light = 0.93 - x * 0.055 + Math.sin(gx * 1.71 + gy * 0.63) * 0.018
-        for (const tree of canopy) {
-          const crown = 0.055 + 0.06 * Math.sqrt(tree.height / tree.species.maxHeight)
-          const distance = Math.hypot(x - tree.x, y - tree.y)
-          if (distance >= crown) continue
-          const weight = 1 - distance / crown
-          const opacity = 0.56 + 0.34 * (tree.height / tree.species.maxHeight)
-          light *= 1 - opacity * weight
-        }
-        this.lightGrid[gy * MAP_WIDTH + gx] = Math.max(0.055, Math.min(0.96, light))
+        this.lightGrid[gy * MAP_WIDTH + gx] = Math.max(
+          0.055,
+          Math.min(0.96, 0.93 - x * 0.055 + Math.sin(gx * 1.71 + gy * 0.63) * 0.018),
+        )
       }
     }
+
+    for (const tree of this.individuals) {
+      if (!tree.canopy) continue
+      const crown = Math.max(0.045, Math.min(0.12, 0.045 + (tree.height - CANOPY_HEIGHT_METERS) * 0.0025))
+      const opacity = Math.max(0.42, Math.min(0.82, 0.42 + (tree.height - CANOPY_HEIGHT_METERS) * 0.018))
+      const minX = Math.max(0, Math.floor((tree.x - crown) * MAP_WIDTH))
+      const maxX = Math.min(MAP_WIDTH - 1, Math.ceil((tree.x + crown) * MAP_WIDTH))
+      const minY = Math.max(0, Math.floor((tree.y - crown) * MAP_HEIGHT))
+      const maxY = Math.min(MAP_HEIGHT - 1, Math.ceil((tree.y + crown) * MAP_HEIGHT))
+      const crownSquared = crown * crown
+      for (let gy = minY; gy <= maxY; gy += 1) {
+        for (let gx = minX; gx <= maxX; gx += 1) {
+          const dx = (gx + 0.5) / MAP_WIDTH - tree.x
+          const dy = (gy + 0.5) / MAP_HEIGHT - tree.y
+          const distanceSquared = dx * dx + dy * dy
+          if (distanceSquared >= crownSquared) continue
+          const weight = 1 - Math.sqrt(distanceSquared) / crown
+          const index = gy * MAP_WIDTH + gx
+          this.lightGrid[index] = Math.max(0.055, this.lightGrid[index] * (1 - opacity * weight))
+        }
+      }
+    }
+    this.lightRevision += 1
   }
 
   private updateWarningAndDisturbance(): void {
     if (!this.warningIssued && this.timeSeconds >= this.nextDisturbanceAt - 10) {
+      const type: DisturbanceType = this.random.next() < 0.56 ? 'typhoon' : 'rainstorm'
       this.warning = {
-        x: this.random.between(0.18, 0.82),
-        y: this.random.between(0.2, 0.8),
-        radius: this.random.between(0.13, 0.19),
+        type,
+        x: type === 'typhoon' ? this.random.between(0.18, 0.82) : 0.5,
+        y: type === 'typhoon' ? this.random.between(0.2, 0.8) : 0.5,
+        radius: type === 'typhoon' ? this.random.between(0.13, 0.19) : 1,
         happensAt: this.nextDisturbanceAt,
       }
       this.warningIssued = true
-      this.addEvent('台风预警：模糊影响区已经出现。没有专用按钮，只能重新平衡。', 'warning')
+      this.addEvent(
+        type === 'typhoon'
+          ? '台风预警：模糊影响区已经出现。高树风险更高。'
+          : '暴雨预警：下一事件将影响全图，碳储备可以缓冲健康损失。',
+        'warning',
+      )
     }
 
     if (this.warning && this.timeSeconds >= this.warning.happensAt) {
       const warning = this.warning
-      const affected = this.individuals.filter(
-        (individual) =>
-          individual.stage === 'adult' &&
-          individual.canopy &&
-          Math.hypot(individual.x - warning.x, individual.y - warning.y) < warning.radius,
-      )
-      let deaths = 0
-      for (const individual of affected) {
-        const state = this.states.get(individual.species.code)!
-        const populationSize = Math.max(1, this.population(individual.species.code).length)
-        const reserveBuffer = Math.min(0.16, state.reserve / populationSize / 35)
-        const heightRisk = 0.28 * (individual.height / individual.species.maxHeight)
-        if (this.random.next() < 0.32 + heightRisk - reserveBuffer) {
-          individual.health = 0
-          deaths += 1
-        } else {
-          individual.health = Math.max(0.22, individual.health - 0.28)
+      if (warning.type === 'typhoon') {
+        const affected = this.individuals.filter(
+          (individual) =>
+            individual.canopy && Math.hypot(individual.x - warning.x, individual.y - warning.y) < warning.radius,
+        )
+        let deaths = 0
+        for (const individual of affected) {
+          const state = this.states.get(individual.species.code)!
+          const populationSize = Math.max(1, this.population(individual.species.code).length)
+          const reserveBuffer = Math.min(0.16, state.reserve / populationSize / 35)
+          const heightRisk = Math.min(0.32, Math.max(0, (individual.height - CANOPY_HEIGHT_METERS) * 0.012))
+          if (this.random.next() < 0.28 + heightRisk - reserveBuffer) {
+            individual.health = 0
+            deaths += 1
+          } else {
+            individual.health = Math.max(0.22, individual.health - 0.24)
+          }
         }
+        this.addEvent(`台风经过：${deaths} 棵冠层树倒伏，局部林下光照升高。`, deaths > 0 ? 'bad' : 'neutral')
+      } else {
+        const populationSizes = new Map(
+          this.activeSpecies.map((species) => [species.code, Math.max(1, this.population(species.code).length)]),
+        )
+        let totalLoss = 0
+        for (const individual of this.individuals) {
+          const state = this.states.get(individual.species.code)!
+          const reservePerIndividual = state.reserve / populationSizes.get(individual.species.code)!
+          const reserveBuffer = Math.min(0.035, reservePerIndividual * 0.012)
+          const baseLoss = { seed: 0.035, seedling: 0.08, sapling: 0.055, adult: 0.035 }[individual.stage]
+          const loss = Math.max(0.012, baseLoss - reserveBuffer)
+          individual.health -= loss
+          totalLoss += loss
+        }
+        const averageLoss = this.individuals.length > 0 ? totalLoss / this.individuals.length : 0
+        this.addEvent(
+          `暴雨席卷全图：${this.individuals.length} 个个体受影响，平均健康下降 ${Math.round(averageLoss * 100)}%。`,
+          'bad',
+        )
       }
-      this.addEvent(`台风经过：${deaths} 棵林冠树倒伏，局部林下光照升高。`, deaths > 0 ? 'bad' : 'neutral')
       this.warning = null
       this.warningIssued = false
       this.nextDisturbanceAt = this.timeSeconds + this.random.between(48, 72)
@@ -575,6 +661,23 @@ export class ForestSimulation {
     if (strategy === 'sun') return Math.max(0.06, (light - 0.1) * 1.34)
     if (strategy === 'shade') return 0.31 + light * 0.58
     return 0.18 + light * 0.91
+  }
+
+  private lightHealthEffect(strategy: Strategy, light: number): number {
+    if (strategy === 'sun') {
+      if (light < 0.28) return -(0.004 + (0.28 - light) * 0.025)
+      if (light > 0.55) return 0.002
+      return 0
+    }
+    if (strategy === 'shade') {
+      if (light > 0.85) return -(0.003 + (light - 0.85) * 0.02)
+      if (light >= 0.12) return 0.0015
+      return 0
+    }
+    if (light < 0.1) return -0.004
+    if (light > 0.93) return -0.003
+    if (light >= 0.15 && light <= 0.8) return 0.001
+    return 0
   }
 
   private establishmentChance(strategy: Strategy, light: number): number {
@@ -592,12 +695,20 @@ export class ForestSimulation {
   private sampleHistory(): void {
     const population = this.population(this.playerCode)
     const state = this.states.get(this.playerCode)!
+    const nonSeeds = population.filter((individual) => individual.stage !== 'seed')
+    const average = (values: number[]) =>
+      values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
     this.history.push({
       time: this.timeSeconds,
       total: population.length,
       adults: population.filter((individual) => individual.stage === 'adult').length,
       reserve: state.reserve,
       income: state.income,
+      averageHeight: average(nonSeeds.map((individual) => individual.height)),
+      averageHealth: average(population.map((individual) => individual.health)),
+      averageLight: average(population.map((individual) => this.lightAt(individual.x, individual.y))),
+      averagePathogenPressure: average(population.map((individual) => individual.pathogenPressure)),
+      canopy: population.filter((individual) => individual.canopy).length,
     })
     if (this.history.length > 360) this.history.shift()
   }
@@ -608,8 +719,14 @@ export class ForestSimulation {
     const share = total > 0 ? playerPopulation.length / total : 0
     const adults = playerPopulation.filter((individual) => individual.stage === 'adult').length
     const activeSpecies = this.activeSpecies.filter((species) => this.population(species.code).length > 0).length
-    const recent = this.history.slice(-20)
+    const recent = this.history.slice(-30)
     const trend = recent.length > 1 ? recent[recent.length - 1].total - recent[0].total : 0
+    const first = this.history[0]
+    const latest = this.history[this.history.length - 1]
+    const change = (current: number, baseline: number, digits = 0) => {
+      const delta = current - baseline
+      return `${delta >= 0 ? '+' : ''}${delta.toFixed(digits)}`
+    }
 
     let title = '多物种共存'
     if (share >= 0.48) title = '玩家物种占优势'
@@ -621,8 +738,11 @@ export class ForestSimulation {
       title,
       summary: `${this.playerSpecies.name} 占群落个体 ${Math.round(share * 100)}%，当前仍有 ${activeSpecies} 个物种存活。`,
       details: [
-        `存活个体 ${playerPopulation.length} · 成树 ${adults}`,
-        `碳储备 ${this.playerState.reserve.toFixed(1)} · 当前碳收入 ${this.playerState.income.toFixed(1)}`,
+        `存活个体 ${playerPopulation.length}（窗口内 ${change(playerPopulation.length, first?.total ?? playerPopulation.length)}）· 成树 ${adults}`,
+        `平均树高 ${latest?.averageHeight.toFixed(1) ?? '0.0'} m · 冠层个体 ${latest?.canopy ?? 0}（高度 ≥ ${CANOPY_HEIGHT_METERS} m）`,
+        `平均健康 ${Math.round((latest?.averageHealth ?? 0) * 100)}% · 平均光照 ${Math.round((latest?.averageLight ?? 0) * 100)}%`,
+        `同种病原菌压力 ${Math.round((latest?.averagePathogenPressure ?? 0) * 100)}% · 存活物种 ${activeSpecies}/6`,
+        `碳储备 ${this.playerState.reserve.toFixed(1)}（窗口内 ${change(this.playerState.reserve, first?.reserve ?? this.playerState.reserve, 1)}）· 当前收入 ${this.playerState.income.toFixed(1)}`,
         trend === 0 ? '最近走势基本稳定。' : `最近走势 ${trend > 0 ? '+' : ''}${trend} 个体。`,
       ],
       terminal: false,

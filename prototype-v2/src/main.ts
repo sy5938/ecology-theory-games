@@ -4,10 +4,17 @@ import './style.css'
 import { ForestScene, MAP_PIXEL_HEIGHT, MAP_PIXEL_WIDTH } from './forest-scene'
 import { gameLayout, setupLayout } from './layouts'
 import { SPECIES, STRATEGIES, type Strategy } from './species'
-import { ForestSimulation, type Allocation, type AllocationKey, type Individual } from './simulation'
+import {
+  CANOPY_HEIGHT_METERS,
+  ForestSimulation,
+  type Allocation,
+  type AllocationKey,
+  type Individual,
+  type OutcomeReport,
+} from './simulation'
 
 type Selection =
-  | { type: 'individual'; id: number }
+  | { type: 'individuals'; ids: number[] }
   | { type: 'cell'; x: number; y: number; light: number }
   | null
 
@@ -34,6 +41,7 @@ let simulation: ForestSimulation | null = null
 let forestScene: ForestScene | null = null
 let game: Phaser.Game | null = null
 let chart: echarts.ECharts | null = null
+let reportChart: echarts.ECharts | null = null
 let chartMode: ChartMode = 'trend'
 let selection: Selection = null
 let selectedSamples: SelectedSample[] = []
@@ -41,6 +49,7 @@ let lastSelectedSampleAt = -1
 let allocationCommitTimer: number | null = null
 let uiInterval: number | null = null
 let reportShownFor: object | null = null
+let manualReportWasPaused: boolean | null = null
 
 renderSetup()
 
@@ -72,8 +81,8 @@ function startGame(): void {
   simulation = new ForestSimulation(SPECIES, selectedCode)
   forestScene = new ForestScene(simulation, {
     onHover: showHoverTooltip,
-    onSelectIndividual: (id) => {
-      selection = { type: 'individual', id }
+    onSelectIndividuals: (ids) => {
+      selection = ids.length > 0 ? { type: 'individuals', ids } : null
       selectedSamples = []
       lastSelectedSampleAt = -1
       updateSelectedPanel()
@@ -86,7 +95,7 @@ function startGame(): void {
       updateSelectedPanel()
     },
     onTransplant: (id) => {
-      selection = { type: 'individual', id }
+      selection = { type: 'individuals', ids: [id] }
       selectedSamples = []
       lastSelectedSampleAt = -1
       updateSelectedPanel()
@@ -139,9 +148,23 @@ function bindGameControls(): void {
 
   document.querySelector<HTMLButtonElement>('#restart-button')!.addEventListener('click', restart)
   document.querySelector<HTMLButtonElement>('#modal-restart-button')!.addEventListener('click', restart)
+  document.querySelector<HTMLButtonElement>('#report-button')!.addEventListener('click', () => {
+    if (!simulation) return
+    manualReportWasPaused = simulation.paused
+    simulation.paused = true
+    showReport(simulation.createOutcomeReport(), true)
+  })
   document.querySelector<HTMLButtonElement>('#continue-button')!.addEventListener('click', () => {
-    simulation?.continueAfterReport()
+    if (!simulation) return
+    if (manualReportWasPaused !== null) {
+      simulation.paused = manualReportWasPaused
+      manualReportWasPaused = null
+    } else {
+      simulation.continueAfterReport()
+    }
     reportShownFor = null
+    reportChart?.dispose()
+    reportChart = null
     document.querySelector('#report-modal')?.classList.add('hidden')
   })
 
@@ -284,7 +307,7 @@ function updateUi(): void {
   collectSelectedSample()
 
   if (Math.floor(simulation.timeSeconds * 2) % 2 === 0) updateChart()
-  if (simulation.report && reportShownFor !== simulation.report) showReport()
+  if (simulation.report && reportShownFor !== simulation.report) showReport(simulation.report)
 }
 
 function updateStageBar(population: Individual[]): void {
@@ -310,8 +333,11 @@ function updateEventPanel(): void {
 
   if (simulation.warning) {
     const remaining = Math.max(0, Math.ceil(simulation.warning.happensAt - simulation.timeSeconds))
-    headline.textContent = `台风预警 · 约 ${remaining} 秒后`
-    message.textContent = '模糊影响区已显示。你只能通过现有投资组合承担或规避风险。'
+    const rainstorm = simulation.warning.type === 'rainstorm'
+    headline.textContent = `${rainstorm ? '暴雨' : '台风'}预警 · 约 ${remaining} 秒后`
+    message.textContent = rainstorm
+      ? '全图个体将承受健康损失；储备越高，缓冲越强。'
+      : '模糊影响区已显示；10 m 以上冠层树风险最高。'
     panel.dataset.tone = 'warning'
   } else {
     const latest = simulation.events[0]
@@ -351,13 +377,42 @@ function updateSelectedPanel(): void {
     return
   }
 
-  const individual = simulation.findIndividual(selection.id)
-  if (!individual) {
-    title.textContent = '该个体已经死亡'
+  const individuals = selection.ids
+    .map((id) => simulation!.findIndividual(id))
+    .filter((individual): individual is Individual => Boolean(individual))
+  if (individuals.length === 0) {
+    title.textContent = '选中个体已经死亡'
     content.className = 'selected-content empty'
-    content.textContent = '死亡个体已经从地图移除；其位置可能形成新的光照机会。'
+    content.textContent = '死亡个体已经从地图移除；若它高于 10 m，原位置会形成新的高光机会。'
     return
   }
+
+  if (individuals.length > 1) {
+    const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length
+    const speciesCount = new Set(individuals.map((individual) => individual.species.code)).size
+    title.textContent = `已选择 ${individuals.length} 个个体 · ${speciesCount} 个物种`
+    content.className = 'selected-content'
+    content.innerHTML = `
+      ${statusGrid([
+        ['平均树高', `${average(individuals.map((individual) => individual.height)).toFixed(2)} m`],
+        ['平均健康', `${Math.round(average(individuals.map((individual) => individual.health)) * 100)}%`],
+        [
+          '平均光照',
+          `${Math.round(average(individuals.map((individual) => simulation!.lightAt(individual.x, individual.y))) * 100)}%`,
+        ],
+        [
+          '病原菌压力',
+          `${Math.round(average(individuals.map((individual) => individual.pathogenPressure)) * 100)}%`,
+        ],
+        ['冠层个体', `${individuals.filter((individual) => individual.canopy).length}`],
+        ['你的个体', `${individuals.filter((individual) => individual.species.code === simulation!.playerCode).length}`],
+      ])}
+      <p class="inspection-note">按住 Shift 或 ⌘ 继续点选/取消；“选中对象”图显示这一组的平均轨迹。</p>
+    `
+    return
+  }
+
+  const individual = individuals[0]
 
   const own = individual.species.code === simulation.playerCode
   title.textContent = `${individual.species.name} · ${simulation.stageLabel(individual.stage)}${own ? ' · 你的物种' : ''}`
@@ -369,7 +424,9 @@ function updateSelectedPanel(): void {
       ['胸径', `${individual.dbh.toFixed(1)} cm`],
       ['局部光照', `${Math.round(simulation.lightAt(individual.x, individual.y) * 100)}%`],
       ['健康', `${Math.round(individual.health * 100)}%`],
-      ['林冠个体', individual.canopy ? '是' : '否'],
+      ['光照健康效应', formatSignedPercent(simulation.lightHealthEffectAt(individual))],
+      ['病原菌压力', `${Math.round(individual.pathogenPressure * 100)}%`],
+      ['冠层个体', individual.canopy ? `是（≥ ${CANOPY_HEIGHT_METERS} m）` : '否'],
       [
         '移栽',
         own
@@ -381,21 +438,24 @@ function updateSelectedPanel(): void {
           : '不可操作',
       ],
     ])}
-    <p class="inspection-note">${own ? '生命史策略影响整个种群；幼苗/幼树可直接拖动移栽。' : '可观察，但不能调整这个物种。'}</p>
+    <p class="inspection-note">${own ? '拖动幼苗/幼树移栽；按住 Shift 或 ⌘ 可多选比较。' : '可观察但不能调整；按住 Shift 或 ⌘ 可加入多选。'}</p>
   `
 }
 
 function collectSelectedSample(): void {
-  if (!simulation || selection?.type !== 'individual') return
+  if (!simulation || selection?.type !== 'individuals') return
   if (simulation.timeSeconds < lastSelectedSampleAt + 1) return
-  const individual = simulation.findIndividual(selection.id)
-  if (!individual) return
+  const individuals = selection.ids
+    .map((id) => simulation!.findIndividual(id))
+    .filter((individual): individual is Individual => Boolean(individual))
+  if (individuals.length === 0) return
+  const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length
   lastSelectedSampleAt = simulation.timeSeconds
   selectedSamples.push({
     time: simulation.timeSeconds,
-    height: individual.height,
-    light: simulation.lightAt(individual.x, individual.y) * 100,
-    health: individual.health * 100,
+    height: average(individuals.map((individual) => individual.height)),
+    light: average(individuals.map((individual) => simulation!.lightAt(individual.x, individual.y))) * 100,
+    health: average(individuals.map((individual) => individual.health)) * 100,
   })
   if (selectedSamples.length > 180) selectedSamples.shift()
 }
@@ -436,11 +496,12 @@ function updateChart(): void {
   }
 
   if (chartMode === 'selected') {
-    setText('chart-title', '选中个体的局部轨迹')
-    if (selection?.type !== 'individual' || selectedSamples.length === 0) {
+    const selectedCount = selection?.type === 'individuals' ? selection.ids.length : 0
+    setText('chart-title', selectedCount > 1 ? `${selectedCount} 个选中对象的平均轨迹` : '选中个体的局部轨迹')
+    if (selection?.type !== 'individuals' || selectedSamples.length === 0) {
       chart.clear()
       chart.setOption({
-        title: { text: '请先点击地图中的一个个体', left: 'center', top: 'middle', textStyle: { fontSize: 13, color: '#7c8d84' } },
+        title: { text: '请先点击或多选地图中的个体', left: 'center', top: 'middle', textStyle: { fontSize: 13, color: '#7c8d84' } },
       })
       return
     }
@@ -484,18 +545,51 @@ function updateChart(): void {
   )
 }
 
-function showReport(): void {
-  if (!simulation?.report) return
-  reportShownFor = simulation.report
+function showReport(report: OutcomeReport, manual = false): void {
+  if (!simulation) return
+  reportShownFor = report
   const modal = document.querySelector<HTMLElement>('#report-modal')!
-  setText('report-title', simulation.report.title)
-  setText('report-summary', simulation.report.summary)
-  document.querySelector<HTMLUListElement>('#report-details')!.innerHTML = simulation.report.details
+  setText('report-kicker', manual ? `当前阶段报告 · ${formatTime(simulation.timeSeconds)}` : '三分钟群落结局检查点')
+  setText('report-title', report.title)
+  setText('report-summary', report.summary)
+  document.querySelector<HTMLUListElement>('#report-details')!.innerHTML = report.details
     .map((detail) => `<li>${detail}</li>`)
     .join('')
+  document.querySelector<HTMLOListElement>('#report-events')!.innerHTML = simulation.events
+    .slice(0, 6)
+    .map((event) => `<li><time>${formatTime(event.time)}</time><span>${event.message}</span></li>`)
+    .join('')
   const continueButton = document.querySelector<HTMLButtonElement>('#continue-button')!
-  continueButton.hidden = simulation.report.terminal
+  continueButton.hidden = report.terminal
+  continueButton.textContent = manual ? '返回森林' : '继续演化'
   modal.classList.remove('hidden')
+
+  reportChart?.dispose()
+  const reportChartElement = document.querySelector<HTMLDivElement>('#report-chart')!
+  reportChart = echarts.init(reportChartElement, undefined, { renderer: 'canvas' })
+  reportChart.setOption({
+    animation: false,
+    textStyle: { fontFamily: 'Inter, ui-sans-serif, system-ui', color: '#344b42' },
+    tooltip: { trigger: 'axis', backgroundColor: '#152d26', borderWidth: 0, textStyle: { color: '#fff' } },
+    legend: { data: ['全部个体', '成树', '平均健康'], top: 0, textStyle: { fontSize: 10 } },
+    grid: { left: 42, right: 42, top: 34, bottom: 28 },
+    xAxis: {
+      type: 'category',
+      data: simulation.history.map((sample) => formatTime(sample.time)),
+      boundaryGap: false,
+      axisLabel: { fontSize: 9 },
+    },
+    yAxis: [
+      { type: 'value', name: '个体', minInterval: 1, splitLine: { lineStyle: { color: '#dfe6dd' } } },
+      { type: 'value', name: '健康%', min: 0, max: 100, splitLine: { show: false } },
+    ],
+    series: [
+      { name: '全部个体', type: 'line', data: simulation.history.map((sample) => sample.total), showSymbol: false, lineStyle: { color: '#e9933e', width: 2.5 } },
+      { name: '成树', type: 'line', data: simulation.history.map((sample) => sample.adults), showSymbol: false, lineStyle: { color: '#335f50' } },
+      { name: '平均健康', type: 'line', yAxisIndex: 1, data: simulation.history.map((sample) => Math.round(sample.averageHealth * 100)), showSymbol: false, lineStyle: { color: '#6d7fb9' } },
+    ],
+  })
+  reportChart.resize()
 }
 
 function showHoverTooltip(individual: Individual | null, screenX = 0, screenY = 0): void {
@@ -507,7 +601,7 @@ function showHoverTooltip(individual: Individual | null, screenX = 0, screenY = 
     return
   }
   const transplantHint = simulation.canTransplant(individual) ? ' · 可拖动移栽' : ''
-  tooltip.innerHTML = `<strong>${individual.species.name}</strong><span>${simulation.stageLabel(individual.stage)} · ${individual.height.toFixed(1)} m · 光照 ${Math.round(simulation.lightAt(individual.x, individual.y) * 100)}%${transplantHint}</span>`
+  tooltip.innerHTML = `<strong>${individual.species.name}</strong><span>${simulation.stageLabel(individual.stage)} · ${individual.height.toFixed(1)} m · 健康 ${Math.round(individual.health * 100)}% · 病原压力 ${Math.round(individual.pathogenPressure * 100)}%${transplantHint}</span>`
   tooltip.style.left = `${Math.min(window.innerWidth - 230, screenX + 18)}px`
   tooltip.style.top = `${Math.min(window.innerHeight - 80, screenY + 18)}px`
   tooltip.classList.remove('hidden')
@@ -534,6 +628,11 @@ function setText(id: string, value: string | number): void {
 function formatTime(seconds: number): string {
   const wholeSeconds = Math.max(0, Math.floor(seconds))
   return `${String(Math.floor(wholeSeconds / 60)).padStart(2, '0')}:${String(wholeSeconds % 60).padStart(2, '0')}`
+}
+
+function formatSignedPercent(value: number): string {
+  if (Math.abs(value) < 0.00005) return '稳定'
+  return `${value > 0 ? '+' : ''}${(value * 100).toFixed(2)}% / 月`
 }
 
 function restart(): void {
