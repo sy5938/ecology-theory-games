@@ -19,3 +19,5 @@ bin-release/
 .DS_Store
 node_modules/
 prototype-v2/dist/
+playwright-report/
+test-results/

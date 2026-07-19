@@ -4,14 +4,19 @@
   "scripts": {
     "demo": "vite prototype-v2",
     "build:demo": "tsc -p prototype-v2/tsconfig.json && vite build prototype-v2",
-    "preview:demo": "vite preview prototype-v2"
+    "preview:demo": "vite preview prototype-v2",
+    "test:model": "vitest run --config vitest.config.ts",
+    "test:browser": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "echarts": "^6.0.0",
+    "fflate": "^0.8.2",
     "phaser": "3.90.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "typescript": "^5.9.3",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "vitest": "^4.1.6"
   }
 }
