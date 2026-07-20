@@ -1,0 +1,56 @@
+﻿time_year,category,tone,message
+0.00,process,neutral,先锋定殖开始演替：96 个体，林冠覆盖 23%。
+1.92,strategy,neutral,重新平衡：生长 97% · 繁殖 2% · 储备 1%
+2.00,strategy,neutral,重新平衡：生长 100% · 繁殖 0% · 储备 0%
+6.25,strategy,neutral,重新平衡：生长 70% · 繁殖 20% · 储备 10%
+6.75,disturbance,warning,暴雨预警：全图个体将受到健康冲击。
+8.25,disturbance,bad,暴雨席卷全图：138 个体健康下降。
+9.25,strategy,neutral,重新平衡：生长 28% · 繁殖 68% · 储备 4%
+9.67,strategy,neutral,重新平衡：生长 2% · 繁殖 98% · 储备 0%
+15.42,strategy,neutral,重新平衡：生长 70% · 繁殖 20% · 储备 10%
+17.42,disturbance,warning,台风预警：局部高树风险上升。
+18.92,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+19.75,strategy,neutral,重新平衡：生长 20% · 繁殖 20% · 储备 60%
+27.58,disturbance,warning,台风预警：局部高树风险上升。
+29.08,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+30.08,process,good,进入长期演替期：已解锁 8× 与 16×，后续结算由玩家主动查看。
+35.75,disturbance,warning,暴雨预警：全图个体将受到健康冲击。
+37.25,disturbance,bad,暴雨席卷全图：384 个体健康下降。
+46.00,disturbance,warning,暴雨预警：全图个体将受到健康冲击。
+47.50,disturbance,bad,暴雨席卷全图：560 个体健康下降。
+56.92,disturbance,warning,台风预警：局部高树风险上升。
+58.42,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+67.67,disturbance,warning,台风预警：局部高树风险上升。
+69.17,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+76.25,disturbance,warning,台风预警：局部高树风险上升。
+77.75,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+85.58,disturbance,warning,台风预警：局部高树风险上升。
+87.08,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+95.25,disturbance,warning,暴雨预警：全图个体将受到健康冲击。
+96.75,disturbance,bad,暴雨席卷全图：818 个体健康下降。
+103.83,disturbance,warning,台风预警：局部高树风险上升。
+105.33,disturbance,bad,台风经过：1 棵冠层树倒伏，局部林窗形成。
+113.75,disturbance,warning,台风预警：局部高树风险上升。
+115.25,disturbance,bad,台风经过：2 棵冠层树倒伏，局部林窗形成。
+122.42,disturbance,warning,台风预警：局部高树风险上升。
+123.92,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+129.83,disturbance,warning,台风预警：局部高树风险上升。
+131.33,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+136.00,pest,warning,专性虫害预警：冬青 长期占据优势，三年后可能暴发。
+136.92,disturbance,warning,暴雨预警：全图个体将受到健康冲击。
+138.42,disturbance,bad,暴雨席卷全图：819 个体健康下降。
+139.08,pest,bad,专性虫害暴发：冬青 死亡 141 个体，优势格局被打破。
+147.67,disturbance,warning,暴雨预警：全图个体将受到健康冲击。
+149.17,disturbance,bad,暴雨席卷全图：818 个体健康下降。
+156.92,disturbance,warning,暴雨预警：全图个体将受到健康冲击。
+158.42,disturbance,bad,暴雨席卷全图：817 个体健康下降。
+159.00,pest,warning,专性虫害预警：冬青 长期占据优势，三年后可能暴发。
+162.00,pest,bad,专性虫害暴发：冬青 死亡 115 个体，优势格局被打破。
+164.92,disturbance,warning,台风预警：局部高树风险上升。
+166.42,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。
+175.92,disturbance,warning,暴雨预警：全图个体将受到健康冲击。
+177.42,disturbance,bad,暴雨席卷全图：820 个体健康下降。
+182.00,pest,warning,专性虫害预警：冬青 长期占据优势，三年后可能暴发。
+185.00,disturbance,warning,台风预警：局部高树风险上升。
+185.00,pest,bad,专性虫害暴发：冬青 死亡 173 个体，优势格局被打破。
+186.50,disturbance,neutral,台风经过：0 棵冠层树倒伏，局部林窗形成。

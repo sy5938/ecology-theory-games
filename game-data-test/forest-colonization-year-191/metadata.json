@@ -1,0 +1,79 @@
+{
+  "prototype": "像森林一样思考 V3",
+  "scenario": "colonization",
+  "scenarioName": "先锋定殖",
+  "playerSpecies": {
+    "code": "SASTZU",
+    "name": "檫木",
+    "latin": "Sassafras tzumu",
+    "strategy": "sun",
+    "environment": "疏林/密林",
+    "maxHeight": 35,
+    "lightPreference": "喜阳"
+  },
+  "activeSpecies": [
+    {
+      "code": "SASTZU",
+      "name": "檫木",
+      "latin": "Sassafras tzumu",
+      "strategy": "sun",
+      "environment": "疏林/密林",
+      "maxHeight": 35,
+      "lightPreference": "喜阳"
+    },
+    {
+      "code": "PHOSHE",
+      "name": "紫楠",
+      "latin": "Phoebe sheareri",
+      "strategy": "shade",
+      "environment": "山地阔叶林",
+      "maxHeight": 15,
+      "lightPreference": "喜阴"
+    },
+    {
+      "code": "CINCAM",
+      "name": "樟",
+      "latin": "Cinnamomum camphora",
+      "strategy": "broad",
+      "environment": "山坡/沟谷/人类干扰地",
+      "maxHeight": 30,
+      "lightPreference": "广适"
+    },
+    {
+      "code": "ILECHI",
+      "name": "冬青",
+      "latin": "Ilex chinensis",
+      "strategy": "broad",
+      "environment": "常绿阔叶林/林缘",
+      "maxHeight": 13,
+      "lightPreference": "广适"
+    },
+    {
+      "code": "MACLEP",
+      "name": "薄叶润楠",
+      "latin": "Machilus leptophylla",
+      "strategy": "shade",
+      "environment": "阴坡谷地混交林",
+      "maxHeight": 28,
+      "lightPreference": "喜阴"
+    },
+    {
+      "code": "TRAFOR",
+      "name": "棕榈",
+      "latin": "Trachycarpus fortunei",
+      "strategy": "broad",
+      "environment": "疏林/人类干扰地",
+      "maxHeight": 10,
+      "lightPreference": "广适"
+    }
+  ],
+  "randomSeed": 2016104587,
+  "exportedAtYear": 190.83333333333755,
+  "mapMeters": {
+    "width": 48,
+    "height": 32
+  },
+  "canopyThresholdMeters": 10,
+  "individualSnapshotCadenceYears": 2,
+  "coordinateUnits": "meters"
+}
