@@ -467,7 +467,10 @@ input[type="range"]::-webkit-slider-thumb {
   line-height: .94;
 }
 
-.setup-lede { max-width: 560px; color: #4f6258; font-size: 16px; line-height: 1.8; }
+.setup-manifesto { max-width: 590px; color: #4f6258; font-size: 15px; line-height: 1.8; }
+.setup-manifesto p { margin-bottom: 13px; }
+.setup-manifesto .setup-thesis { margin-bottom: 22px; color: #243f33; font-weight: 650; }
+.setup-thesis em { font-family: Georgia, serif; font-weight: 500; }
 .setup-rules { display: flex; flex-wrap: wrap; gap: 7px; }
 .setup-rules span { padding: 6px 10px; border: 1px solid #cbd6cb; border-radius: 99px; color: #496056; font-size: 10px; font-weight: 750; }
 

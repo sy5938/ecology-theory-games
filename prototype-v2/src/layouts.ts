@@ -211,7 +211,11 @@ export function setupLayout(
       <section class="setup-copy">
         <div class="eyebrow">THROWAWAY PLAYABLE PROTOTYPE · V3</div>
         <h1>像森林一样思考</h1>
-        <p class="setup-lede">你只控制一个物种。选择森林结构，在光照、竞争、病原菌与虫害之间配置生长、繁殖和储备。</p>
+        <div class="setup-manifesto">
+          <p>人的一生，总是在取舍中向前。鱼与熊掌难以兼得：高薪可能以时间、强度与健康为代价；选择此刻的舒适，也可能在未来回望时，遗憾自己没有更早出发。</p>
+          <p>森林里的生命亦然。生长、繁殖与储备，每一份投入都意味着放弃另一种可能。现在，试着从森林的尺度思考：是向上争夺阳光，为后代豪赌，还是为未知保留力量？</p>
+          <p class="setup-thesis"><em>To be or not to be</em>——真正的问题，从来不只是“要不要”，而是你愿意为选择付出什么代价。</p>
+        </div>
         <div class="setup-rules"><span>森林年</span><span>三种情景</span><span>第 30 年结算</span><span>可持续演替</span></div>
       </section>
       <section class="setup-form surface">
