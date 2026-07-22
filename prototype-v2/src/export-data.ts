@@ -39,21 +39,62 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
   )
   const speciesHistory = csv(
     [
-      'time_year', 'species_code', 'total', 'seeds', 'seedlings', 'saplings', 'adults', 'canopy',
-      'carbon_reserve', 'carbon_income', 'average_health', 'community_share',
+      'time_year', 'species_code', 'strategy', 'starting_population', 'total', 'births', 'deaths',
+      'births_per_100', 'deaths_per_100', 'seeds', 'seedlings', 'saplings', 'adults', 'canopy',
+      'average_height_m', 'average_dbh_cm', 'basal_area_m2',
+      'carbon_reserve', 'gross_carbon_income', 'annual_carbon_sequestered',
+      'cumulative_carbon_sequestered', 'average_health', 'community_share',
     ],
     simulation.speciesHistory.map((record) => [
-      record.time.toFixed(2), record.speciesCode, record.total, record.seeds, record.seedlings, record.saplings,
-      record.adults, record.canopy, record.reserve.toFixed(3), record.income.toFixed(3),
+      record.time.toFixed(2), record.speciesCode, record.strategy, record.startingPopulation, record.total,
+      record.births, record.deaths, record.birthsPer100.toFixed(4), record.deathsPer100.toFixed(4),
+      record.seeds, record.seedlings, record.saplings, record.adults, record.canopy,
+      record.averageHeight.toFixed(3), record.averageDbh.toFixed(3), record.basalAreaM2.toFixed(4),
+      record.reserve.toFixed(3), record.income.toFixed(3),
+      record.annualCarbonSequestered.toFixed(3), record.cumulativeCarbonSequestered.toFixed(3),
       record.averageHealth.toFixed(4), record.share.toFixed(4),
     ]),
   )
+  const functionalTypeHistory = csv(
+    [
+      'time_year', 'strategy', 'starting_population', 'total', 'births', 'deaths', 'births_per_100',
+      'deaths_per_100', 'seeds', 'seedlings', 'saplings', 'adults', 'canopy', 'species_richness',
+      'basal_area_m2', 'annual_carbon_sequestered', 'cumulative_carbon_sequestered',
+    ],
+    simulation.functionalTypeHistory.map((record) => [
+      record.time.toFixed(2), record.strategy, record.startingPopulation, record.total, record.births,
+      record.deaths, record.birthsPer100.toFixed(4), record.deathsPer100.toFixed(4), record.seeds,
+      record.seedlings, record.saplings, record.adults, record.canopy, record.speciesRichness,
+      record.basalAreaM2.toFixed(4), record.annualCarbonSequestered.toFixed(3),
+      record.cumulativeCarbonSequestered.toFixed(3),
+    ]),
+  )
+  const communityHistory = csv(
+    [
+      'time_year', 'starting_population', 'total', 'births', 'deaths', 'births_per_100', 'deaths_per_100',
+      'seeds', 'seedlings', 'saplings', 'adults', 'canopy', 'species_richness',
+      'canopy_cover', 'gross_carbon_income', 'annual_carbon_sequestered',
+      'cumulative_carbon_sequestered', 'average_health', 'average_height_m', 'average_dbh_cm',
+      'basal_area_m2', 'shannon_diversity', 'simpson_diversity', 'evenness',
+    ],
+    simulation.communityHistory.map((record) => [
+      record.time.toFixed(2), record.startingPopulation, record.total, record.births, record.deaths,
+      record.birthsPer100.toFixed(4), record.deathsPer100.toFixed(4), record.seeds, record.seedlings,
+      record.saplings, record.adults,
+      record.canopy, record.speciesRichness, record.canopyCover.toFixed(4), record.grossCarbonIncome.toFixed(3),
+      record.annualCarbonSequestered.toFixed(3), record.cumulativeCarbonSequestered.toFixed(3),
+      record.averageHealth.toFixed(4), record.averageHeight.toFixed(3), record.averageDbh.toFixed(3),
+      record.basalAreaM2.toFixed(4), record.shannonDiversity.toFixed(4), record.simpsonDiversity.toFixed(4),
+      record.evenness.toFixed(4),
+    ]),
+  )
   const events = csv(
-    ['time_year', 'category', 'tone', 'message'],
-    simulation.events.map((event) => [event.time.toFixed(2), event.category, event.tone, event.message]),
+    ['time_year', 'priority', 'category', 'tone', 'message'],
+    simulation.events.map((event) => [event.time.toFixed(2), event.priority, event.category, event.tone, event.message]),
   )
   const report = simulation.report ?? simulation.createOutcomeReport()
   const metadata = {
+    schemaVersion: '4.1',
     prototype: '像森林一样思考 V3',
     scenario: simulation.scenarioId,
     scenarioName: SCENARIOS[simulation.scenarioId].name,
@@ -61,15 +102,24 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
     activeSpecies: simulation.activeSpecies,
     randomSeed: simulation.seed,
     exportedAtYear: simulation.forestYear,
+    initialDensityPer400m2: simulation.densityPer400m2,
+    initialCommunitySize: simulation.initialCommunitySize,
+    currentCommunitySize: simulation.individuals.length,
+    averageDbhCm: simulation.averageDbh(),
+    basalAreaM2: simulation.basalArea(),
     mapMeters: { width: simulation.mapWidthMeters, height: simulation.mapHeightMeters },
     canopyThresholdMeters: 10,
     individualSnapshotCadenceYears: 2,
     coordinateUnits: 'meters',
+    coordinateOrigin: 'lower-left',
+    carbonUnits: 'game-carbon-units',
   }
   const archive = zipSync(
     {
       'individual_snapshots.csv': strToU8(snapshots),
       'species_history.csv': strToU8(speciesHistory),
+      'functional_type_history.csv': strToU8(functionalTypeHistory),
+      'community_history.csv': strToU8(communityHistory),
       'events.csv': strToU8(events),
       'report.json': strToU8(JSON.stringify(report, null, 2)),
       'metadata.json': strToU8(JSON.stringify(metadata, null, 2)),
