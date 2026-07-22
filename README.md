@@ -12,6 +12,10 @@
 
 多物种共存和单种占优都可能成为结局。游戏没有唯一正确的策略：每一种获得，都伴随着代价；每一次保守，也意味着放弃另一种可能。
 
+### 游戏截图
+
+![《像森林一样思考》游戏界面](docs/images/forest-workspace.png)
+
 ### 在线体验
 
 https://sy5938.github.io/ecology-theory-games/

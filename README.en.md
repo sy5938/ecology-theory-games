@@ -8,7 +8,11 @@
 >
 > *To be or not to be*—the real question is rarely whether to choose, but what price you are willing to pay for that choice.
 
-**Think Like a Forest** is a single-player forest succession strategy game that runs in the browser. You manage one real tree species, continually allocating limited resources among growth, reproduction, and reserves while confronting competition for light, host-specific pathogens, extreme weather, and pest outbreaks targeting dominant species.
+## Screenshot
+
+![Think Like a Forest gameplay workspace](docs/images/forest-workspace.png)
+
+**Think Like a Forest** is a browser-based, single-player forest-succession strategy game. Choose a real-world tree species and manage its population, continually allocating limited resources among growth, reproduction, and reserves while confronting competition for light, host-specific pathogens, extreme weather, and pest outbreaks that target dominant species.
 
 Coexistence and single-species dominance are both possible outcomes. There is no single correct strategy: every gain carries a cost, and every cautious choice leaves another path unexplored.
 
