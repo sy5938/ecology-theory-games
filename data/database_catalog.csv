@@ -1,0 +1,10 @@
+source_id,database_name,scope,fields_for_game,access_mode,license_or_terms,priority,local_status,official_url,last_reviewed,notes
+LOCAL_TT,天童候选物种资料,本地物种名录与生境,物种身份|中文名|学名|生境|最大树高,仓库内已有资料,项目内部资料,P0,已接入,./species_traits_tt_v1.csv,2026-07-26,当前12种物种身份的直接来源
+IPLANT,iPlant植物智,中国植物志与物种信息,分类|形态|高度|分布|生境,网页逐种核验,遵循站点条款并逐条引用,P0,12种已有链接,https://www.iplant.cn/,2026-07-26,用于身份和自然史叙述而非直接给出游戏概率
+TRY,TRY Plant Trait Database,全球植物功能性状,SLA|叶干物质含量|木材密度|种子质量|最大高度,申请或下载数据产品,按请求数据集许可与引用要求,P0,待申请物种查询,https://www.try-db.org/,2026-07-26,保留原始观测和种内变异不能只存物种均值
+FORESTGEO,ForestGEO,长期森林样地复测,胸径增长|存活|招募|空间坐标|树种,按样地申请或公开下载,逐样地条款与PI批准,P0,待联系天童或邻近样地,https://forestgeo.si.edu/explore-data,2026-07-26,用于校准人口学方向和空间负密度制约
+COMPADRE,COMPADRE Plant Matrix Database,植物种群矩阵模型,阶段存活|生长|逆生长|繁殖,开放下载并遵守用户协议,开放数据但须遵循用户协议和引用,P1,可下载但暂未导入,https://compadre-db.org/Data/Compadre,2026-07-26,不能把不同时间步和种群背景的矩阵直接照搬
+GIFT,GIFT Global Inventory of Floras and Traits,植物区系与宏观性状,生长型|生活型|区域分布,研究数据下载,按数据产品许可,P2,未接入,https://gift.uni-goettingen.de/,2026-07-26,用于缺失性状的高层级先验
+GWD,Global Wood Density Database,全球木材密度,木材密度,公开数据产品,按数据产品许可与引用,P1,未接入,https://datadryad.org/stash/dataset/doi:10.5061/dryad.234,2026-07-26,风折抗性只做间接先验不能等同机械强度
+SID,Kew Seed Information Database,种子性状,种子质量|萌发|储藏行为,网页或数据产品,按Kew条款,P1,未接入,https://ser-sid.org/,2026-07-26,用于质量—数量—扩散—建立权衡
+GBIF,GBIF,物种出现记录,分布|环境包络|记录密度,API或下载DOI,CC许可逐记录继承,P2,未接入,https://www.gbif.org/,2026-07-26,只用于环境范围与教学地图不用于直接推断耐荫

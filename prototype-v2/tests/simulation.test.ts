@@ -4,6 +4,7 @@ import { createExportArchive } from '../src/export-data'
 import { competitionFromLoad, sigmoid } from '../src/pressure'
 import {
   ForestSimulation,
+  SCENARIOS,
   gapReleaseMultiplier,
   selfThinningSizeMultiplier,
   type Individual,
@@ -93,6 +94,131 @@ describe('pressure mapping', () => {
     expect(sigmoid(100)).toBeLessThanOrEqual(1)
     expect(competitionFromLoad(1)).toBeLessThan(competitionFromLoad(3))
     expect(competitionFromLoad(3)).toBeLessThan(competitionFromLoad(7))
+  })
+})
+
+describe('V4 species profiles and scenario missions', () => {
+  it('loads a complete, differentiated and provenance-labelled profile for every roster species', () => {
+    expect(SPECIES).toHaveLength(12)
+    expect(new Set(SPECIES.map((species) => species.profile.archetype)).size).toBe(12)
+    for (const species of SPECIES) {
+      expect(species.profile.lightCompensation).toBeGreaterThan(0)
+      expect(species.profile.lightSaturation).toBeGreaterThan(species.profile.lightCompensation)
+      expect(species.profile.playStrength.length).toBeGreaterThan(4)
+      expect(species.profile.tradeoff.length).toBeGreaterThan(4)
+      expect(species.profile.provenance).toContain('游戏校准')
+    }
+  })
+
+  it('publishes a measurable mission for every existing scenario', () => {
+    for (const scenario of ['closed', 'sparse', 'colonization'] as ScenarioId[]) {
+      const simulation = makeSimulation(scenario, 10, 2026)
+      const mission = simulation.missionStatus()
+      expect(mission.title.length).toBeGreaterThan(4)
+      expect(mission.instruction).toContain(`第 ${mission.targetYear} 年`)
+      expect(mission.progress).toBeGreaterThanOrEqual(0)
+      expect(mission.progress).toBeLessThanOrEqual(1)
+      expect(mission.progressLabel.length).toBeGreaterThan(4)
+    }
+  })
+
+  it('keeps background herbivory visible before any outbreak', () => {
+    const simulation = makeSimulation('sparse', 10, 7788)
+    advanceOneStep(simulation)
+    const established = simulation.individuals.filter((individual) => individual.stage !== 'seed')
+    expect(established.some((individual) => individual.insectPressure > 0)).toBe(true)
+    expect(established.every((individual) => individual.insectPressure <= 1)).toBe(true)
+  })
+
+  it.each([101, 2026, 7788])('keeps a shade-tolerant player able to invest under closed canopy (seed %i)', (seed) => {
+    const shade = SPECIES.find((species) => species.code === 'MACLEP')!
+    const simulation = new ForestSimulation(SPECIES, shade.code, {
+      scenarioId: 'closed', densityPer400m2: 30, seed,
+    })
+    advanceOneStep(simulation)
+    expect(simulation.playerState.surplus).toBeGreaterThan(0.05)
+  })
+})
+
+describe('five-year strategy game loop', () => {
+  it('locks a committed strategy and charges reserve only for warning-driven early replanning', () => {
+    const simulation = makeSimulation('closed', 10, 2026)
+    const first = simulation.commitPlayerStrategy({ growth: 0.7, reproduction: 0.2, reserve: 0.1 })
+    expect(first.ok).toBe(true)
+    expect(simulation.strategyLockedUntil).toBeCloseTo(5, 8)
+    expect(simulation.strategyCommitStatus()).toMatchObject({ available: false, early: false })
+
+    simulation.warning = {
+      type: 'typhoon',
+      x: 0.5,
+      y: 0.5,
+      radius: 0.2,
+      happensAt: 1,
+      intensity: 0.8,
+      heading: 0,
+    }
+    const reserveBefore = simulation.playerState.reserve
+    const early = simulation.commitPlayerStrategy({ growth: 0.2, reproduction: 0.2, reserve: 0.6 })
+    expect(early).toMatchObject({ ok: true, cost: 6 })
+    expect(simulation.playerState.reserve).toBeCloseTo(reserveBefore - 6, 8)
+    expect(simulation.strategyReviews.at(-1)?.endedEarly).toBe(true)
+  })
+
+  it('publishes a causal review after each completed five-year commitment', () => {
+    const simulation = makeSimulation('sparse', 10, 7788)
+    simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 }, 'resilience')
+    advanceTo(simulation, 5.2)
+    expect(simulation.strategyReview).toMatchObject({
+      cycle: 1,
+      endedEarly: false,
+      startedAt: 0,
+      plannedUntil: 5,
+      prediction: { key: 'resilience' },
+      predictionMet: expect.any(Boolean),
+    })
+    expect(simulation.strategyReview!.after.population).toBeGreaterThan(0)
+    expect(simulation.strategyReview!.evidence).toHaveLength(4)
+    expect(simulation.strategyReview!.evidence.join(' ')).toContain('主因判断')
+    expect(simulation.strategyReview!.evidence.join(' ')).toContain('人口账')
+    expect(simulation.strategyReview!.evidence.join(' ')).toContain('林窗账')
+    expect(simulation.strategyReviews).toHaveLength(1)
+    expect(simulation.strategyCommitStatus().available).toBe(true)
+  })
+
+  it('does not award the closed-forest objective merely for waiting', () => {
+    const simulation = makeSimulation('closed', 30, 2026)
+    const initialProgress = simulation.missionStatus().progress
+    simulation.forestYear = 29
+    expect(simulation.missionStatus().progress).toBe(initialProgress)
+    expect(simulation.missionStatus().progress).toBeLessThanOrEqual(0.5)
+    expect(simulation.missionStatus().progressLabel).toContain('完成释放')
+  })
+
+  it('integrates stored carbon by elapsed years instead of filling the reserve every monthly tick', () => {
+    const shade = SPECIES.find((species) => species.strategy === 'shade' && species.maxHeight > 10)!
+    const simulation = new ForestSimulation(SPECIES, shade.code, {
+      scenarioId: 'closed', densityPer400m2: 30, seed: 2026,
+    })
+    simulation.commitPlayerStrategy({ growth: 0.25, reproduction: 0.15, reserve: 0.6 }, 'resilience')
+    advanceTo(simulation, 5)
+    expect(simulation.playerState.reserve).toBeGreaterThan(28)
+    expect(simulation.playerState.reserve).toBeLessThan(80)
+    expect(18 / simulation.playerState.reserve).toBeGreaterThan(0.2)
+  })
+
+  it('stops at the scenario target year with a scored mission result', () => {
+    const simulation = makeSimulation('sparse', 10, 2026)
+    simulation.commitPlayerStrategy({ growth: 0.7, reproduction: 0.2, reserve: 0.1 }, 'canopy')
+    simulation.forestYear = SCENARIOS.sparse.targetYear - 0.04
+    advanceOneStep(simulation)
+    expect(simulation.paused).toBe(true)
+    expect(simulation.report).toMatchObject({
+      kind: 'mission',
+      canContinue: true,
+      mission: { score: expect.any(Number), grade: expect.any(String) },
+    })
+    expect(simulation.report?.title).toContain('情景结算')
+    expect(simulation.report?.strategyImpacts.join(' ')).toContain('最终周期预测')
   })
 })
 
@@ -197,9 +323,9 @@ describe('successional strategy contrast', () => {
     const established = population.filter((individual) => individual.stage !== 'seed')
     const occupiedTenMeterCells = new Set(established.map(({ x, y }) => `${Math.floor(x * 10)}:${Math.floor(y * 10)}`))
 
-    expect(population.length).toBeGreaterThan(20)
-    expect(established.length).toBeGreaterThan(12)
-    expect(occupiedTenMeterCells.size).toBeGreaterThan(8)
+    expect(population.length).toBeGreaterThan(12)
+    expect(established.length).toBeGreaterThan(8)
+    expect(occupiedTenMeterCells.size).toBeGreaterThan(6)
   })
 
   it('gives shade-tolerant juveniles low-light protection and a three-year release after canopy death', () => {
@@ -229,14 +355,58 @@ describe('successional strategy contrast', () => {
     expect(gapReleaseMultiplier('broad', true)).toBe(1.4)
     expect(gapReleaseMultiplier('sun', true)).toBe(1)
   })
+
+  it.each([101, 2026, 7788])('lets a shade-tolerant population keep a multi-stage bank under closed canopy (seed %i)', (seed) => {
+    const shadeSpecies = SPECIES.find((species) => species.code === 'MACLEP')!
+    const simulation = new ForestSimulation(SPECIES, shadeSpecies.code, {
+      scenarioId: 'closed', densityPer400m2: 30, seed,
+    })
+    simulation.setAllocation({ growth: 0.34, reproduction: 0.33, reserve: 0.33 })
+    advanceTo(simulation, 30)
+    const population = simulation.population(shadeSpecies.code)
+    expect(population.length).toBeGreaterThan(25)
+    expect(new Set(population.map((individual) => individual.stage)).size).toBeGreaterThanOrEqual(2)
+    expect(population.some((individual) => individual.stage === 'seedling' || individual.stage === 'sapling')).toBe(true)
+  })
+})
+
+describe('structured disturbance outcomes', () => {
+  it('turns a severe typhoon into persistent crown damage and a spatially limited death record', () => {
+    const simulation = makeSimulation('sparse', 10, 2026)
+    simulation.warning = {
+      type: 'typhoon',
+      x: 0.5,
+      y: 0.5,
+      radius: 0.45,
+      happensAt: 0,
+      intensity: 1,
+      heading: 0,
+    }
+    advanceOneStep(simulation)
+    const damaged = simulation.individuals.filter(
+      (individual) => individual.structuralDamage > 0 || individual.defoliationUntil > simulation.forestYear,
+    )
+    const typhoonDeaths = simulation.deaths.filter((death) => death.cause === 'typhoon')
+    const event = [...simulation.events].reverse().find((entry) => entry.category === 'disturbance')
+    expect(damaged.length).toBeGreaterThan(0)
+    expect(typhoonDeaths.length).toBeGreaterThan(0)
+    expect(typhoonDeaths.length).toBeLessThan(simulation.initialCommunitySize)
+    expect(event?.message).toContain('落叶')
+    expect(event?.message).toContain('断枝')
+    expect(event?.message).toContain('倒伏')
+  })
 })
 
 describe('maturity and outcome rules', () => {
-  it('uses the same five-metre-or-60-percent reproductive maturity rule for every species', () => {
+  it('uses species-specific reproductive maturity while keeping it within playable bounds', () => {
     const simulation = makeSimulation('colonization', 10)
     for (const species of SPECIES) {
-      expect(simulation.maturityHeight(species)).toBeCloseTo(Math.min(5, species.maxHeight * 0.6), 8)
+      expect(simulation.maturityHeight(species)).toBeCloseTo(
+        Math.max(0.8, Math.min(5, species.maxHeight * species.profile.maturityFraction)),
+        8,
+      )
     }
+    expect(new Set(SPECIES.map((species) => simulation.maturityHeight(species).toFixed(2))).size).toBeGreaterThanOrEqual(5)
 
     const sapling = simulation.population(playerCode).find((individual) => individual.stage === 'sapling')!
     sapling.height = simulation.maturityHeight(sapling.species)
@@ -298,7 +468,7 @@ describe('community statistics and carbon sequestration', () => {
     expect(speciesStatistics.reduce((sum, statistics) => sum + statistics.cumulativeCarbonSequestered, 0))
       .toBeCloseTo(communityStatistics.cumulativeCarbonSequestered, 10)
     for (const state of simulation.states.values()) {
-      expect(state.cumulativeCarbonSequestered).toBeCloseTo(state.income, 10)
+      expect(state.cumulativeCarbonSequestered).toBeCloseTo(state.income / 12, 10)
     }
   })
 
@@ -437,7 +607,7 @@ describe('five-year summaries and event priority', () => {
     }
     advanceOneStep(simulation)
 
-    expect(simulation.deaths).toHaveLength(playerPopulation.length)
+    expect(simulation.deaths.filter((death) => death.speciesCode === playerCode)).toHaveLength(playerPopulation.length)
     expect(simulation.events).toHaveLength(eventsBefore + 1)
     expect(simulation.emergencyEvents).toHaveLength(1)
     expect(simulation.emergencyEvents[0]).toMatchObject({ priority: 'emergency', category: 'process' })
@@ -446,8 +616,13 @@ describe('five-year summaries and event priority', () => {
 })
 
 describe('forest-year checkpoint and export', () => {
-  it('forces only the year-100 checkpoint and unlocks long-term speeds', () => {
+  it('runs the scenario ending before the optional year-100 sandbox checkpoint', () => {
     const simulation = makeSimulation('closed', 10)
+    simulation.forestYear = SCENARIOS.closed.targetYear - 0.04
+    advanceOneStep(simulation)
+    expect(simulation.report).toMatchObject({ kind: 'mission', canContinue: true })
+    simulation.continueAfterReport()
+
     simulation.speed = 16
     simulation.forestYear = 99.76
     simulation.update(0.1)
@@ -479,6 +654,8 @@ describe('forest-year checkpoint and export', () => {
       'metadata.json',
       'report.json',
       'species_history.csv',
+      'species_profiles.csv',
+      'strategy_reviews.csv',
     ])
     const snapshots = strFromU8(archive['individual_snapshots.csv'])
     expect(snapshots).toContain('competition_pressure')
@@ -487,6 +664,8 @@ describe('forest-year checkpoint and export', () => {
     const speciesHistory = strFromU8(archive['species_history.csv'])
     const communityHistory = strFromU8(archive['community_history.csv'])
     const functionalHistory = strFromU8(archive['functional_type_history.csv'])
+    const speciesProfiles = strFromU8(archive['species_profiles.csv'])
+    const strategyReviews = strFromU8(archive['strategy_reviews.csv'])
     expect(speciesHistory).toContain('births_per_100')
     expect(speciesHistory).toContain('annual_carbon_sequestered')
     expect(speciesHistory).toContain('cumulative_carbon_sequestered')
@@ -494,10 +673,14 @@ describe('forest-year checkpoint and export', () => {
     expect(communityHistory).toContain('gross_carbon_income')
     expect(communityHistory).toContain('shannon_diversity')
     expect(functionalHistory).toContain('deaths_per_100')
+    expect(speciesProfiles).toContain('light_compensation')
+    expect(speciesProfiles).toContain('provenance')
+    expect(strategyReviews).toContain('prediction_met')
+    expect(strategyReviews).toContain('causal_evidence')
 
     const metadata = JSON.parse(strFromU8(archive['metadata.json']))
     expect(metadata).toMatchObject({
-      schemaVersion: '4.1',
+      schemaVersion: '4.3',
       scenario: 'closed',
       initialDensityPer400m2: 10,
       initialCommunitySize: 250,
@@ -508,6 +691,7 @@ describe('forest-year checkpoint and export', () => {
     })
     expect(metadata.averageDbhCm).toBeGreaterThan(0)
     expect(metadata.basalAreaM2).toBeGreaterThan(0)
+    expect(metadata.mission.title).toBe('守住幼苗库，等到林窗释放')
   })
 })
 

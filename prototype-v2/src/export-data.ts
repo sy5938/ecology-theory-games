@@ -14,7 +14,7 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
     [
       'time_year', 'individual_id', 'x_m', 'y_m', 'species_code', 'species_name', 'strategy', 'stage',
       'alive', 'height_m', 'dbh_cm', 'health', 'local_light', 'competition_pressure', 'pathogen_pressure',
-      'insect_pressure', 'carbon_reserve', 'death_cause',
+      'insect_pressure', 'structural_damage', 'defoliation_until_year', 'carbon_reserve', 'death_cause',
     ],
     simulation.individualSnapshots.map((record) => [
       record.time.toFixed(2),
@@ -33,6 +33,8 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
       record.competitionPressure.toFixed(4),
       record.pathogenPressure.toFixed(4),
       record.insectPressure.toFixed(4),
+      record.structuralDamage.toFixed(4),
+      record.defoliationUntil.toFixed(2),
       record.carbonReserve.toFixed(3),
       record.deathCause,
     ]),
@@ -92,14 +94,51 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
     ['time_year', 'priority', 'category', 'tone', 'message'],
     simulation.events.map((event) => [event.time.toFixed(2), event.priority, event.category, event.tone, event.message]),
   )
+  const speciesProfiles = csv(
+    [
+      'species_code', 'species_name', 'archetype', 'strategy', 'light_compensation', 'light_saturation',
+      'max_assimilation', 'growth_rate', 'low_light_survival', 'seed_mass', 'seed_output', 'dispersal',
+      'establishment', 'wood_density', 'wind_resistance', 'recovery', 'herbivory_defense', 'crown_scale',
+      'maturity_fraction', 'confidence', 'play_strength', 'tradeoff', 'provenance',
+    ],
+    simulation.activeSpecies.map((species) => [
+      species.code, species.name, species.profile.archetype, species.strategy,
+      species.profile.lightCompensation, species.profile.lightSaturation, species.profile.maxAssimilation,
+      species.profile.growthRate, species.profile.lowLightSurvival, species.profile.seedMass,
+      species.profile.seedOutput, species.profile.dispersal, species.profile.establishment,
+      species.profile.woodDensity, species.profile.windResistance, species.profile.recovery,
+      species.profile.herbivoryDefense, species.profile.crownScale, species.profile.maturityFraction,
+      species.profile.confidence, species.profile.playStrength, species.profile.tradeoff,
+      species.profile.provenance,
+    ]),
+  )
+  const strategyReviews = csv(
+    [
+      'cycle', 'started_year', 'ended_year', 'ended_early', 'growth_allocation', 'reproduction_allocation',
+      'reserve_allocation', 'prediction', 'prediction_target', 'prediction_met', 'population_change',
+      'juvenile_change', 'canopy_change', 'release_change', 'reserve_change', 'average_health_change',
+      'causal_evidence',
+    ],
+    simulation.strategyReviews.map((review) => [
+      review.cycle, review.startedAt.toFixed(2), review.endedAt.toFixed(2), review.endedEarly,
+      review.allocation.growth.toFixed(4), review.allocation.reproduction.toFixed(4),
+      review.allocation.reserve.toFixed(4), review.prediction.label, review.prediction.target,
+      review.predictionMet, review.changes.population, review.changes.juveniles, review.changes.canopy,
+      review.changes.releases, review.changes.reserve.toFixed(3), review.changes.averageHealth.toFixed(4),
+      review.evidence.join(' | '),
+    ]),
+  )
   const report = simulation.report ?? simulation.createOutcomeReport()
   const metadata = {
-    schemaVersion: '4.1',
-    prototype: '像森林一样思考 V3',
+    schemaVersion: '4.3',
+    prototype: '像森林一样思考 V4.1',
     scenario: simulation.scenarioId,
     scenarioName: SCENARIOS[simulation.scenarioId].name,
     playerSpecies: simulation.playerSpecies,
     activeSpecies: simulation.activeSpecies,
+    mission: simulation.missionStatus(),
+    missionEvaluation: simulation.missionEvaluation(),
+    completedStrategyCycles: simulation.strategyReviews.length,
     randomSeed: simulation.seed,
     exportedAtYear: simulation.forestYear,
     initialDensityPer400m2: simulation.densityPer400m2,
@@ -121,6 +160,8 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
       'functional_type_history.csv': strToU8(functionalTypeHistory),
       'community_history.csv': strToU8(communityHistory),
       'events.csv': strToU8(events),
+      'species_profiles.csv': strToU8(speciesProfiles),
+      'strategy_reviews.csv': strToU8(strategyReviews),
       'report.json': strToU8(JSON.stringify(report, null, 2)),
       'metadata.json': strToU8(JSON.stringify(metadata, null, 2)),
     },

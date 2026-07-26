@@ -136,7 +136,7 @@ const layerSidebar = `
 const simulationControls = `
   <section class="simulation-controls surface" data-tutorial-target="start">
     <div class="clock"><span id="game-time">第 0.0 年</span><small id="forest-phase">观察准备期</small></div>
-    <button class="primary-control" id="pause-button" type="button">开始演替</button>
+    <button class="primary-control" id="pause-button" type="button" disabled>确认预测与策略并开始</button>
     <div class="speed-group" aria-label="演化速度">
       <button type="button" data-speed="1" class="active">1×</button>
       <button type="button" data-speed="2">2×</button>
@@ -148,16 +148,30 @@ const simulationControls = `
   </section>
 `
 
+const missionPanel = `
+  <section class="mission-panel surface" aria-label="本局生态问题">
+    <div>
+      <span>本局生态问题 · <b id="mission-deadline">目标年</b></span>
+      <strong id="mission-title">正在读取目标</strong>
+      <small id="mission-instruction"></small>
+    </div>
+    <div class="mission-progress">
+      <span id="mission-progress-label">准备中</span>
+      <i><b id="mission-progress-bar"></b></i>
+    </div>
+  </section>
+`
+
 const allocationPanel = `
   <section class="allocation-panel allocation-dock surface" data-tutorial-target="allocation">
     <div class="panel-heading">
       <div><span class="label">你的生命史策略</span><strong id="allocation-impact">等待第一个生态时间步</strong></div>
       <div class="allocation-tools">
         <div class="active-abilities" aria-label="主动能力">
-          <button type="button" data-ability="defense"><strong>诱导防御</strong><span id="defense-status">18 储备</span></button>
-          <button type="button" data-ability="mast"><strong>集中结实</strong><span id="mast-status">15 储备</span></button>
-          <button type="button" data-ability="disperse"><strong>远距播散</strong><span id="disperse-status">12 储备</span></button>
-          <button type="button" data-ability="nursery"><strong>幼苗保育</strong><span id="nursery-status">15 储备</span></button>
+          <button type="button" data-ability="defense" title="消耗 18 储备，5 年内把自身病原和虫食伤害减半"><strong>诱导防御</strong><span id="defense-status">18 储备</span></button>
+          <button type="button" data-ability="mast" title="消耗 15 储备，把当期资源转成一次高数量种子脉冲"><strong>集中结实</strong><span id="mast-status">15 储备</span></button>
+          <button type="button" data-ability="disperse" title="消耗 12 储备，5 年内提高远距种子比例和扩散距离"><strong>远距播散</strong><span id="disperse-status">12 储备</span></button>
+          <button type="button" data-ability="nursery" title="消耗 15 储备，5 年内提高种子建立率并降低幼苗竞争伤害"><strong>幼苗保育</strong><span id="nursery-status">15 储备</span></button>
         </div>
         <div class="allocation-presets" aria-label="快速策略">
           <button type="button" data-allocation-preset="balanced">均衡观察</button>
@@ -184,6 +198,20 @@ const allocationPanel = `
       <input id="reserve-slider" data-allocation="reserve" type="range" min="0" max="100" step="1" />
       <small><span>缓冲低光、虫害与扰动</span><b id="reserve-spend">存入 0.0</b></small>
     </div>
+    </div>
+    <fieldset class="strategy-prediction" id="strategy-prediction">
+      <legend>先下注：五年后你预计哪项会发生？</legend>
+      <button type="button" data-prediction="canopy"><strong>抢到上层空间</strong><span>新增 ≥ 1 个林冠个体</span></button>
+      <button type="button" data-prediction="recruitment"><strong>扩大下一代</strong><span>幼体净增 ≥ 5 个</span></button>
+      <button type="button" data-prediction="resilience"><strong>守住风险缓冲</strong><span>储备不降、健康跌幅 ≤ 5%</span></button>
+    </fieldset>
+    <div class="strategy-contract" id="strategy-contract">
+      <div>
+        <span id="strategy-cycle-label">第一个五年周期</span>
+        <strong id="strategy-lock-status">调整方案后确认承诺</strong>
+        <small id="strategy-commit-reason">一旦开始，常态下五年内不能免费改变。</small>
+      </div>
+      <button type="button" id="commit-strategy">承诺五年策略</button>
     </div>
     <div class="carbon-flow">
       <div><span>碳收入</span><strong id="carbon-income">0.0</strong></div>
@@ -295,9 +323,35 @@ const overlays = `
       </div>
       <div class="modal-actions">
         <button id="continue-button" type="button">返回森林</button>
+        <button id="retry-seed-button" type="button">同种子改策略重试</button>
         <button id="report-export-button" type="button" class="quiet-button">导出本局数据</button>
         <button id="modal-restart-button" type="button" class="quiet-button">重新开始</button>
       </div>
+    </div>
+  </div>
+  <div id="cycle-review-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="cycle-review-title">
+    <div class="modal-card cycle-review-card">
+      <header>
+        <div class="eyebrow" id="cycle-review-kicker">五年策略复盘</div>
+        <h2 id="cycle-review-title">第一个周期结束</h2>
+        <p id="cycle-review-summary"></p>
+      </header>
+      <section class="cycle-review-verdict" id="cycle-review-verdict"></section>
+      <div class="cycle-review-metrics" id="cycle-review-metrics"></div>
+      <section class="cycle-review-events">
+        <span>因果证据与关键转折</span>
+        <p id="cycle-review-events">环境相对平稳。</p>
+      </section>
+      <section class="cycle-next-choice">
+        <div><span class="label">下一周期只能选择一条主路线</span><strong>承诺后执行五年</strong></div>
+        <div class="cycle-choice-grid">
+          <button type="button" data-cycle-preset="canopy"><strong>抢占林窗</strong><span>生长 70% · 预测新增林冠</span><small>代价：繁殖与储备薄弱</small></button>
+          <button type="button" data-cycle-preset="pioneer"><strong>传播下一代</strong><span>繁殖 65% · 预测幼体净增</span><small>代价：现有个体增长慢</small></button>
+          <button type="button" data-cycle-preset="shade"><strong>林下蓄势</strong><span>储备 60% · 预测守住缓冲</span><small>代价：短期扩张最慢</small></button>
+          <button type="button" data-cycle-preset="balanced"><strong>均衡试探</strong><span>均衡投入 · 预测守住缓冲</span><small>代价：缺少单项爆发力</small></button>
+        </div>
+        <button type="button" id="cycle-custom-strategy" class="quiet-button">返回面板自定义比例</button>
+      </section>
     </div>
   </div>
   <div id="tutorial-modal" class="tutorial-overlay hidden" role="dialog" aria-modal="false" aria-labelledby="tutorial-title">
@@ -348,7 +402,7 @@ export function gameLayout(player: Species, scenarioId: ScenarioId, activeSpecie
     <div class="app-shell unified-layout">
       ${header(player, scenarioId)}
       <main class="workspace-root" id="workspace-root" aria-label="森林演替工作台">
-        ${workspacePanel('map', '森林地图', `<div class="workspace-map-stack"><div class="workspace-map-rail">${layerSidebar}</div><div class="workspace-map-main">${mapPanel}<aside class="map-query-popover hidden" id="map-query-popover" aria-live="polite">${selectedPanel}</aside><div class="map-functional-legend" aria-label="功能型图例"><span><i class="legend-own">★</i>玩家</span><button type="button" data-legend-strategy="sun"><i style="--legend:#e9933e"></i>喜阳先锋型</button><button type="button" data-legend-strategy="shade"><i style="--legend:#627bb6"></i>耐荫型</button><button type="button" data-legend-strategy="broad"><i style="--legend:#4e9a70"></i>广适型</button><span><i class="legend-selection"></i>选中</span></div>${simulationControls}${eventPanel}</div></div>`, { required: true, minWidth: 520, minHeight: 560 })}
+        ${workspacePanel('map', '森林地图', `<div class="workspace-map-stack"><div class="workspace-map-rail">${layerSidebar}</div><div class="workspace-map-main">${mapPanel}<aside class="map-query-popover hidden" id="map-query-popover" aria-live="polite">${selectedPanel}</aside><div class="map-functional-legend" aria-label="功能型图例"><span><i class="legend-own">★</i>玩家</span><button type="button" data-legend-strategy="sun"><i style="--legend:#e9933e"></i>喜阳先锋型</button><button type="button" data-legend-strategy="shade"><i style="--legend:#627bb6"></i>耐荫型</button><button type="button" data-legend-strategy="broad"><i style="--legend:#4e9a70"></i>广适型</button><span><i class="legend-selection"></i>选中</span></div>${missionPanel}${simulationControls}${eventPanel}</div></div>`, { required: true, minWidth: 520, minHeight: 560 })}
         ${workspacePanel('strategy', '你的生命史策略', allocationPanel, { minWidth: 340, minHeight: 250 })}
         ${workspacePanel('statistics', '统计与图表', `<div class="workspace-statistics-stack">${chartPanel}</div>`, { minWidth: 340, minHeight: 360 })}
         <nav class="workspace-taskbar" aria-label="工作台窗口">
@@ -380,7 +434,7 @@ export function setupLayout(
     return `<button type="button" class="strategy-card ${selectedStrategy === strategy ? 'selected' : ''}" data-strategy="${strategy}"><i style="--strategy:${entry.css}"></i><strong>${entry.name}</strong><span>${entry.description}</span></button>`
   }).join('')
   const speciesCards = SPECIES.filter((species) => species.strategy === selectedStrategy).map(
-    (species) => `<button type="button" class="species-card ${selectedCode === species.code ? 'selected' : ''}" data-species="${species.code}"><strong>${species.name}</strong><em>${species.latin}</em><span>最高约 ${species.maxHeight} m · ${species.environment}</span></button>`,
+    (species) => `<button type="button" class="species-card ${selectedCode === species.code ? 'selected' : ''}" data-species="${species.code}"><strong>${species.name}<small>${species.profile.archetype}</small></strong><em>${species.latin}</em><span>优势：${species.profile.playStrength}</span><span>代价：${species.profile.tradeoff}</span><span>最高约 ${species.maxHeight} m · 参数可信度 ${species.profile.confidence === 'medium' ? '中' : species.profile.confidence === 'high' ? '高' : '低'}</span></button>`,
   ).join('')
   const scenarioCards = (Object.keys(SCENARIOS) as ScenarioId[]).map((scenarioId) => {
     const scenario = SCENARIOS[scenarioId]
@@ -398,8 +452,8 @@ export function setupLayout(
     `<div class="step-label">01 · 选择森林情景</div><h2>你想从怎样的森林开始？</h2><p class="wizard-intro">不同情景改变初始林冠与光照，但空间位置都保持完全随机。</p><div class="scenario-grid">${scenarioCards}</div>`,
     `<div class="step-label">02 · 调整初始群落密度</div><h2>每个 20 × 20 m 样方放多少个体？</h2><p class="wizard-intro">低值区获得更多滑动行程，也可以直接输入精确数值。</p><div class="density-control"><label for="density-slider"><span>10</span><strong><output id="density-value">${density}</output> 个 / 400 m²</strong><span>400</span></label><input id="density-slider" type="range" min="0" max="100" step="1" value="${densityToSlider(density)}" /><div class="density-exact"><label for="density-input">精确数量</label><input id="density-input" type="number" min="10" max="400" step="1" value="${density}" /></div></div><div class="density-preview"><span>100 × 100 m 全图预计</span><strong id="density-total">${total.toLocaleString()} 个体</strong><p id="density-impact">${densityMessage}</p></div>`,
     `<div class="step-label">03 · 选择生态策略类型</div><h2>你准备以什么方式生存？</h2><p class="wizard-intro">策略决定光照耐受、扩散、生长与死亡风险。</p><div class="strategy-grid">${strategyCards}</div>`,
-    `<div class="step-label">04 · 选择真实物种</div><h2>选择你要控制的物种</h2><p class="wizard-intro">同一策略下的物种仍有最大树高与环境偏好的差异。</p><div class="species-grid" id="species-grid">${speciesCards}</div>`,
-    `<div class="step-label">05 · 确认本局设置</div><h2>从空地与竞争中开始演替</h2><div class="setup-summary"><div><span>森林情景</span><strong>${SCENARIOS[selectedScenario].name}</strong></div><div><span>初始密度</span><strong>${density} 个 / 400 m²</strong></div><div><span>预计全图</span><strong>${total.toLocaleString()} 个体${selectedScenario === 'colonization' ? '（含玩家 6 个）' : ''}</strong></div><div><span>你的物种</span><strong>${player.name} · ${STRATEGIES[player.strategy].name}</strong></div></div><p class="density-warning">${densityMessage} 自定义密度会改变初始林冠覆盖、平均胸径和竞争强度。</p>`,
+    `<div class="step-label">04 · 选择真实物种</div><h2>选择你要控制的物种</h2><p class="wizard-intro">同一功能型内也有不同的生长、种子、抗风、恢复与防御路线。</p><div class="species-grid" id="species-grid">${speciesCards}</div>`,
+    `<div class="step-label">05 · 确认本局设置</div><h2>${SCENARIOS[selectedScenario].objective}</h2><p class="wizard-intro">${SCENARIOS[selectedScenario].objectiveHint}</p><div class="setup-summary"><div><span>森林情景</span><strong>${SCENARIOS[selectedScenario].name}</strong></div><div><span>初始密度</span><strong>${density} 个 / 400 m²</strong></div><div><span>预计全图</span><strong>${total.toLocaleString()} 个体${selectedScenario === 'colonization' ? '（含玩家 6 个）' : ''}</strong></div><div><span>你的物种</span><strong>${player.name} · ${player.profile.archetype}</strong></div></div><p class="density-warning">${densityMessage} 你的优势是“${player.profile.playStrength}”；代价是“${player.profile.tradeoff}”。</p>`,
   ]
   return `
     <main class="setup-screen">

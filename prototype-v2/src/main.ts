@@ -17,6 +17,8 @@ import {
   type IndividualSnapshot,
   type OutcomeReport,
   type ScenarioId,
+  type StrategyCycleReview,
+  type StrategyPredictionKey,
   type ViewLayer,
 } from './simulation'
 
@@ -56,6 +58,14 @@ const ALLOCATION_PRESETS: Record<string, Allocation> = {
   recovery: { growth: 0.2, reproduction: 0.25, reserve: 0.55 },
 }
 
+const PRESET_PREDICTIONS: Record<string, StrategyPredictionKey> = {
+  canopy: 'canopy',
+  pioneer: 'recruitment',
+  shade: 'resilience',
+  recovery: 'resilience',
+  balanced: 'resilience',
+}
+
 type FontSize = 'small' | 'medium' | 'large'
 type MarkerSize = 'small' | 'medium' | 'large'
 
@@ -74,8 +84,8 @@ const TUTORIAL_STEPS = [
   { target: 'layers', title: '按需控制地图图层', body: '左侧可筛选高度层、生活史阶段与物种。风险和新近死亡默认关闭，放大到个体尺度后再按需开启。' },
   { target: 'inspect', title: '点击检查个体或空地', body: '查询卡会显示在点击位置旁。展开详情可查看树高、胸径、光照与竞争；点击地图外或按 Esc 关闭。' },
   { target: 'statistics', title: '用图表观察此消彼长', body: '右上统计窗口可切换物种、功能型、出生死亡、固碳与多样性图表；“放大查看”可提供更完整的图表空间。' },
-  { target: 'allocation', title: '分配有限的碳', body: '在生长、繁殖和储备之间取舍，或使用快速方案。主动能力会消耗碳储备并进入冷却。' },
-  { target: 'start', title: '开始并观察长期演替', body: '点击“开始演替”推进时间，可暂停和切换倍速。底部仅即时显示突发事件，否则每五年汇总群落与玩家种群变化。' },
+  { target: 'allocation', title: '先预测，再分配有限的碳', body: '先选择一条五年后可验证的预测，再在生长、繁殖和储备之间取舍。承诺后常态下五年内不能免费改变。' },
+  { target: 'start', title: '承诺第一个五年周期', body: '确认预测与策略后时间才推进。每五年会强制暂停、验算预测并给出人口、林窗和风险证据；预警期可付费提前改策。' },
 ] as const
 
 const appRoot = document.querySelector<HTMLDivElement>('#app')!
@@ -95,8 +105,8 @@ let statisticsSpeciesCode = selectedCode
 let selection: Selection = null
 let selectedSamples: SelectedSample[] = []
 let lastSelectedSampleAt = -Infinity
-let allocationCommitTimer: number | null = null
 let uiInterval: number | null = null
+let resizeObserver: ResizeObserver | null = null
 let reportShownFor: object | null = null
 let manualReportWasPaused: boolean | null = null
 let lastPropertyTableYear = -1
@@ -114,6 +124,8 @@ const chartLegendSelections = new Map<ChartMode, Record<string, boolean>>()
 let pinnedChartTooltip: PinnedChartTooltip | null = null
 let chartTooltipRestoreFrame: number | null = null
 let suppressChartTooltip = false
+let shownStrategyReviewCycle = 0
+let selectedPrediction: StrategyPredictionKey | null = null
 
 applyFontSize(readFontSize())
 renderSetup()
@@ -161,7 +173,7 @@ function renderSetup(): void {
     setupStep = Math.min(4, setupStep + 1) as SetupStep
     renderSetup()
   })
-  document.querySelector<HTMLButtonElement>('#start-game')?.addEventListener('click', startGame)
+  document.querySelector<HTMLButtonElement>('#start-game')?.addEventListener('click', () => startGame())
   bindFontControls()
 }
 
@@ -207,13 +219,14 @@ function uiFontPx(base: number): number {
   return Math.round(base * scale)
 }
 
-function startGame(): void {
+function startGame(seed?: number): void {
   const player = SPECIES.find((species) => species.code === selectedCode)!
   statisticsScope = 'player'
   statisticsSpeciesCode = selectedCode
   simulation = new ForestSimulation(SPECIES, selectedCode, {
     scenarioId: selectedScenario,
     densityPer400m2: selectedDensity,
+    seed,
   })
   appRoot.innerHTML = gameLayout(player, selectedScenario, simulation.activeSpecies)
   const speciesLayerTemplate = document.querySelector<HTMLTemplateElement>('#active-species-layer-template')
@@ -224,6 +237,8 @@ function startGame(): void {
   chartLegendSelections.clear()
   pinnedChartTooltip = null
   suppressChartTooltip = false
+  shownStrategyReviewCycle = 0
+  selectedPrediction = null
   simulation.paused = true
   forestScene = new ForestScene(simulation, {
     onHover: showHoverTooltip,
@@ -282,7 +297,8 @@ function startGame(): void {
   updateChart(true)
   uiInterval = window.setInterval(updateUi, 250)
   let resizeQueued = false
-  const resizeObserver = new ResizeObserver(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = new ResizeObserver(() => {
     if (resizeQueued) return
     resizeQueued = true
     window.requestAnimationFrame(() => {
@@ -337,8 +353,8 @@ function bindGameControls(): void {
   document.querySelector<HTMLButtonElement>('#pause-button')!.addEventListener('click', () => {
     if (!simulation || simulation.report) return
     if (!gameStarted) {
-      gameStarted = true
-      simulation.paused = false
+      commitPendingStrategy(true)
+      return
     } else simulation.paused = !simulation.paused
     updateUi()
   })
@@ -352,6 +368,7 @@ function bindGameControls(): void {
   })
   document.querySelector<HTMLButtonElement>('#restart-button')!.addEventListener('click', restart)
   document.querySelector<HTMLButtonElement>('#modal-restart-button')!.addEventListener('click', restart)
+  document.querySelector<HTMLButtonElement>('#retry-seed-button')!.addEventListener('click', retrySameSeed)
   document.querySelector<HTMLButtonElement>('#report-button')!.addEventListener('click', () => openManualReport())
   document.querySelector<HTMLButtonElement>('#export-button')!.addEventListener('click', exportRun)
   document.querySelector<HTMLButtonElement>('#report-export-button')!.addEventListener('click', exportRun)
@@ -386,15 +403,45 @@ function bindGameControls(): void {
   document.querySelectorAll<HTMLInputElement>('[data-allocation]').forEach((slider) => {
     slider.addEventListener('input', () => rebalance(slider.dataset.allocation as AllocationKey, Number(slider.value)))
   })
+  document.querySelector<HTMLButtonElement>('#commit-strategy')!.addEventListener('click', () => commitPendingStrategy(!gameStarted))
+  document.querySelectorAll<HTMLButtonElement>('[data-prediction]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (button.disabled) return
+      selectedPrediction = button.dataset.prediction as StrategyPredictionKey
+      updateUi()
+    })
+  })
   document.querySelectorAll<HTMLButtonElement>('[data-allocation-preset]').forEach((button) => {
     button.addEventListener('click', () => {
       if (!simulation) return
-      const preset = ALLOCATION_PRESETS[button.dataset.allocationPreset ?? '']
+      const presetName = button.dataset.allocationPreset ?? ''
+      const preset = ALLOCATION_PRESETS[presetName]
       if (!preset) return
-      simulation.setAllocation(preset)
-      syncAllocationControls(simulation.allocation)
+      selectedPrediction = PRESET_PREDICTIONS[presetName] ?? null
+      syncAllocationControls(preset)
       updateUi()
     })
+  })
+  document.querySelectorAll<HTMLButtonElement>('[data-cycle-preset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const preset = ALLOCATION_PRESETS[button.dataset.cyclePreset ?? '']
+      if (!simulation || !preset) return
+      syncAllocationControls(preset)
+      const prediction = PRESET_PREDICTIONS[button.dataset.cyclePreset ?? ''] ?? 'resilience'
+      const result = simulation.commitPlayerStrategy(preset, prediction)
+      if (!result.ok) return
+      selectedPrediction = null
+      document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.add('hidden')
+      simulation.paused = false
+      updateUi()
+    })
+  })
+  document.querySelector<HTMLButtonElement>('#cycle-custom-strategy')!.addEventListener('click', () => {
+    selectedPrediction = null
+    document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.add('hidden')
+    document.querySelector<HTMLElement>('[data-panel-id="strategy"]')?.setAttribute('data-flash', 'true')
+    window.setTimeout(() => document.querySelector<HTMLElement>('[data-panel-id="strategy"]')?.removeAttribute('data-flash'), 900)
+    updateUi()
   })
   document.querySelectorAll<HTMLButtonElement>('[data-ability]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -619,10 +666,42 @@ function rebalance(changedKey: AllocationKey, changedPercent: number): void {
     current[otherKeys[1]] = remaining - current[otherKeys[0]]
   }
   syncAllocationControls({ growth: current.growth / 100, reproduction: current.reproduction / 100, reserve: current.reserve / 100 })
-  if (allocationCommitTimer !== null) window.clearTimeout(allocationCommitTimer)
-  allocationCommitTimer = window.setTimeout(() => {
-    simulation?.setAllocation({ growth: current.growth / 100, reproduction: current.reproduction / 100, reserve: current.reserve / 100 })
-  }, 120)
+}
+
+function pendingAllocation(): Allocation {
+  const values = readAllocationControls()
+  return {
+    growth: values.growth / 100,
+    reproduction: values.reproduction / 100,
+    reserve: values.reserve / 100,
+  }
+}
+
+function allocationForecast(allocation: Allocation): string {
+  if (allocation.growth >= 0.55) return '预测代价：高度增长快，但招募和扰动缓冲会偏弱。'
+  if (allocation.reproduction >= 0.5) return '预测代价：种子与招募增加，但现有个体增长和缓冲会变慢。'
+  if (allocation.reserve >= 0.5) return '预测代价：抗风险能力提高，但短期扩张最慢。'
+  return '预测代价：波动较小，但没有一项能获得爆发投入。'
+}
+
+function commitPendingStrategy(startAfterCommit: boolean): void {
+  if (!simulation) return
+  if (!selectedPrediction) {
+    setText('strategy-commit-reason', '先选择一条五年后可以验证的预测。')
+    return
+  }
+  const result = simulation.commitPlayerStrategy(pendingAllocation(), selectedPrediction)
+  setText('strategy-commit-reason', result.message)
+  if (!result.ok) {
+    updateUi()
+    return
+  }
+  if (startAfterCommit) gameStarted = true
+  if (gameStarted) simulation.paused = false
+  selectedPrediction = null
+  document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.add('hidden')
+  syncAllocationControls(simulation.allocation)
+  updateUi()
 }
 
 function readAllocationControls(): Record<AllocationKey, number> {
@@ -665,8 +744,16 @@ function updateUi(): void {
   const riskCount = population.filter((individual) => individual.riskScore >= RISK_THRESHOLD).length
   const canopyCount = simulation.individuals.filter((individual) => individual.canopy).length
   const cover = simulation.canopyCover()
+  const commitStatus = simulation.strategyCommitStatus()
   setText('game-time', `第 ${simulation.forestYear.toFixed(1)} 年`)
-  setText('forest-phase', !gameStarted ? '观察准备期 · 检查地图后开始' : simulation.longTermUnlocked ? '长期演替期' : '种群建立期 · 第 100 年首次结算')
+  setText(
+    'forest-phase',
+    !gameStarted
+      ? '观察准备期 · 承诺第一个五年策略'
+      : simulation.longTermUnlocked
+        ? '长期演替沙盒'
+        : `情景进行中 · 第 ${SCENARIOS[simulation.scenarioId].targetYear} 年结算`,
+  )
   setText('population-total', population.length)
   setText('average-health', `${Math.round(averageHealth * 100)}%`)
   setText('population-share', `${totalCommunity ? Math.round((population.length / totalCommunity) * 100) : 0}%`)
@@ -683,20 +770,69 @@ function updateUi(): void {
   setText(
     'allocation-impact',
     !gameStarted
-      ? '演替尚未开始：可先检查个体、移动幼体并调整投资'
+      ? '先判断生态问题，再承诺第一个五年策略'
       : simulation.playerState.surplus > 0.05
-      ? `本年可投资 ${simulation.playerState.surplus.toFixed(1)} · 风险个体 ${riskCount}`
-      : '收入只能覆盖维持，检查风险个体与局部光照',
+        ? `本年可投资 ${simulation.playerState.surplus.toFixed(1)} · 风险个体 ${riskCount}`
+        : '碳收支为负：下一周期应在增长、繁殖或储备中明确放弃一项',
   )
   setText('map-summary', `${canopyCount} 个林冠个体 · 覆盖 ${Math.round(cover * 100)}% · 平均光照 ${Math.round(averageLight * 100)}%`)
-  setText('pause-button', !gameStarted ? '开始演替' : simulation.paused && !simulation.report ? '继续' : '暂停')
+  const mission = simulation.missionStatus()
+  setText('mission-title', mission.title)
+  setText('mission-instruction', mission.instruction)
+  setText('mission-deadline', `第 ${mission.targetYear} 年检查`)
+  setText('mission-progress-label', mission.progressLabel)
+  const missionBar = document.querySelector<HTMLElement>('#mission-progress-bar')
+  if (missionBar) missionBar.style.width = `${Math.round(mission.progress * 100)}%`
+  setText('pause-button', !gameStarted ? '确认预测与策略并开始' : simulation.paused && !simulation.report ? '继续' : '暂停')
+  const pauseButton = document.querySelector<HTMLButtonElement>('#pause-button')
+  if (pauseButton) pauseButton.disabled = !gameStarted && !selectedPrediction
+  const contract = document.querySelector<HTMLElement>('#strategy-contract')
+  if (contract) contract.dataset.early = String(commitStatus.early)
+  const completedCycles = simulation.strategyReviews.filter((review) => !review.endedEarly).length
+  setText('strategy-cycle-label', simulation.hasCommittedStrategy
+    ? `第 ${completedCycles + 1} 个五年周期`
+    : '第一个五年周期')
+  setText(
+    'strategy-lock-status',
+    !simulation.hasCommittedStrategy
+      ? '尚未承诺'
+      : commitStatus.available
+        ? commitStatus.early
+          ? '风险窗口：可付费提前改策'
+          : '周期结束：等待下一次承诺'
+        : `已锁定至第 ${simulation.strategyLockedUntil.toFixed(1)} 年`,
+  )
+  const observationOnly = population.length === 0
+  const displayedPrediction = commitStatus.available ? selectedPrediction : simulation.currentStrategyPrediction?.key ?? null
+  document.querySelectorAll<HTMLButtonElement>('[data-prediction]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.prediction === displayedPrediction)
+    button.disabled = observationOnly || !commitStatus.available || Boolean(simulation!.report)
+  })
+  setText(
+    'strategy-commit-reason',
+    commitStatus.available && !selectedPrediction
+      ? '先选择一条五年后可以验证的预测。'
+      : `${commitStatus.reason} ${allocationForecast(pendingAllocation())}`,
+  )
+  const commitButton = document.querySelector<HTMLButtonElement>('#commit-strategy')
+  if (commitButton) {
+    commitButton.disabled = !commitStatus.available || !selectedPrediction || Boolean(simulation.report)
+    commitButton.textContent = !gameStarted
+      ? '承诺并开始'
+      : commitStatus.early
+        ? `支付 ${commitStatus.cost} 储备改策`
+        : '承诺下一周期'
+  }
   document.querySelectorAll<HTMLButtonElement>('[data-long-term]').forEach((button) => {
     button.disabled = !simulation!.longTermUnlocked
     button.title = simulation!.longTermUnlocked ? '' : '第 100 年结算后解锁'
   })
-  const observationOnly = population.length === 0
-  document.querySelectorAll<HTMLInputElement>('[data-allocation]').forEach((input) => { input.disabled = observationOnly })
-  document.querySelectorAll<HTMLButtonElement>('[data-allocation-preset]').forEach((button) => { button.disabled = observationOnly })
+  document.querySelectorAll<HTMLInputElement>('[data-allocation]').forEach((input) => {
+    input.disabled = observationOnly || !commitStatus.available || Boolean(simulation!.report)
+  })
+  document.querySelectorAll<HTMLButtonElement>('[data-allocation-preset]').forEach((button) => {
+    button.disabled = observationOnly || !commitStatus.available || Boolean(simulation!.report)
+  })
   updateAbilityButtons()
   updateStatisticsPanel()
   updateEventPanel()
@@ -705,6 +841,11 @@ function updateUi(): void {
   if (document.querySelector('#properties-drawer:not(.hidden)') && Math.floor(simulation.forestYear) !== lastPropertyTableYear) renderPropertyTable()
   updateChart()
   if (simulation.report && reportShownFor !== simulation.report) showReport(simulation.report, false)
+  else if (
+    simulation.strategyReview &&
+    simulation.strategyReview.cycle > shownStrategyReviewCycle &&
+    document.querySelector('#cycle-review-modal.hidden')
+  ) showStrategyReview(simulation.strategyReview)
 }
 
 function updateAbilityButtons(): void {
@@ -816,14 +957,19 @@ function updateEventPanel(): void {
     panel.dataset.tone = 'neutral'
   } else if (simulation.pestWarning) {
     const species = simulation.activeSpecies.find((item) => item.code === simulation!.pestWarning!.speciesCode)!
+    const targetsPlayer = species.code === simulation.playerCode
     headline.textContent = `专性虫害预警 · 第 ${simulation.pestWarning.happensAt.toFixed(1)} 年`
-    message.textContent = `${species.name} 长期占据优势。诱导防御可以减半虫害死亡风险。`
+    message.textContent = targetsPlayer
+      ? `${species.name}就是你的物种，聚集风险 ${Math.round(simulation.pestWarning.risk * 100)}%。虫食会先压低光合与繁殖；现在可付费改策或启动诱导防御。`
+      : `${species.name}的聚集风险 ${Math.round(simulation.pestWarning.risk * 100)}%，你的物种不是宿主。对手将被压低光合与繁殖，可保留储备并利用随后出现的空间。`
     panel.dataset.tone = 'warning'
   } else if (simulation.warning) {
     const remaining = Math.max(0, simulation.warning.happensAt - simulation.forestYear)
     const rainstorm = simulation.warning.type === 'rainstorm'
     headline.textContent = `${rainstorm ? '暴雨' : '台风'}预警 · ${remaining.toFixed(1)} 年后`
-    message.textContent = rainstorm ? '全图个体将承受健康损失，储备提供缓冲。' : '模糊影响区已显示，冠层高树风险最高。'
+    message.textContent = rainstorm
+      ? '全图个体将承受健康损失，储备提供缓冲。'
+      : `路径影响区已显示，强度 ${Math.round(simulation.warning.intensity * 100)}%；高度、抗风性和储备共同决定落叶、断枝或倒伏。`
     panel.dataset.tone = 'warning'
   } else {
     const emergency = simulation.emergencyEvents.at(-1)
@@ -924,6 +1070,10 @@ function updateSelectedPanel(): void {
     ['竞争压力', `${Math.round(individual.competitionPressure * 100)}%`],
     ['病原菌压力', `${Math.round(individual.pathogenPressure * 100)}%`],
     ['虫害压力', `${Math.round(individual.insectPressure * 100)}%`],
+    ['结构损伤', `${Math.round(individual.structuralDamage * 100)}%`],
+    ['落叶恢复', individual.defoliationUntil > simulation.forestYear
+      ? `预计第 ${individual.defoliationUntil.toFixed(1)} 年`
+      : '无持续落叶'],
     ['林冠个体', individual.canopy ? `是（≥ ${CANOPY_HEIGHT_METERS} m）` : '否'],
     ['坐标', `${(individual.x * simulation.mapWidthMeters).toFixed(1)}, ${(individual.y * simulation.mapHeightMeters).toFixed(1)} m`],
   ])}</details><p class="inspection-note">${own && simulation.canTransplant(individual) ? '可拖动移栽一次，健康付出 4%。' : '点击“定位”放大查看该个体。'}</p>`
@@ -1243,6 +1393,52 @@ function openManualReport(): void {
   showReport(simulation.createOutcomeReport(), true)
 }
 
+function showStrategyReview(review: StrategyCycleReview): void {
+  if (!simulation) return
+  shownStrategyReviewCycle = review.cycle
+  simulation.paused = true
+  const dominant = review.allocation.growth >= Math.max(review.allocation.reproduction, review.allocation.reserve)
+    ? '生长'
+    : review.allocation.reproduction >= review.allocation.reserve
+      ? '繁殖'
+      : '储备'
+  setText('cycle-review-kicker', `第 ${review.startedAt.toFixed(1)}–${review.endedAt.toFixed(1)} 年 · ${dominant}主导`)
+  setText('cycle-review-title', `第 ${review.cycle} 个五年策略周期结束`)
+  setText(
+    'cycle-review-summary',
+    `你把最多资源投入${dominant}。现在先验算开局预测，再根据证据选择下一条路线。`,
+  )
+  const verdict = document.querySelector<HTMLElement>('#cycle-review-verdict')
+  if (verdict) {
+    verdict.dataset.met = String(review.predictionMet)
+    verdict.innerHTML = `<strong>${review.predictionMet ? '预测命中' : '预测落空'} · ${review.prediction.label}</strong><span>原预测：${review.prediction.target}</span>`
+  }
+  const signed = (value: number, digits = 0) => `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`
+  const metrics = [
+    ['玩家种群', signed(review.changes.population), `${review.before.population} → ${review.after.population}`],
+    ['幼苗与幼树', signed(review.changes.juveniles), `${review.before.juveniles} → ${review.after.juveniles}`],
+    ['林冠个体', signed(review.changes.canopy), `${review.before.canopy} → ${review.after.canopy}`],
+    ['碳储备', signed(review.changes.reserve, 1), `${review.before.reserve.toFixed(1)} → ${review.after.reserve.toFixed(1)}`],
+  ]
+  const metricRoot = document.querySelector<HTMLElement>('#cycle-review-metrics')
+  if (metricRoot) {
+    metricRoot.innerHTML = metrics
+      .map(([label, change, range]) => `<div><span>${label}</span><strong>${change}</strong><small>${range}</small></div>`)
+      .join('')
+  }
+  setText(
+    'cycle-review-events',
+    [
+      ...review.evidence,
+      review.turningPoints.length > 0
+        ? `转折：${review.turningPoints.map((event) => `第 ${event.time.toFixed(1)} 年 ${event.message}`).join('；')}`
+        : '转折：没有突发事件，变化主要来自资源承诺、光照与邻域竞争。',
+    ].join(' '),
+  )
+  document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.remove('hidden')
+  updateUi()
+}
+
 function showReport(report: OutcomeReport, manual: boolean): void {
   if (!simulation) return
   reportShownFor = report
@@ -1254,7 +1450,9 @@ function showReport(report: OutcomeReport, manual: boolean): void {
         ? '玩家物种灭绝 · 可继续观察'
         : report.kind === 'community-extinct'
           ? '森林群落终局'
-          : '首次阶段复盘 · 长期演替即将解锁',
+          : report.kind === 'mission'
+            ? '情景终局 · 可以同种子重试'
+            : '首次阶段复盘 · 长期演替即将解锁',
   )
   setText('report-title', report.title)
   setText('report-outcome', report.outcome)
@@ -1272,7 +1470,11 @@ function showReport(report: OutcomeReport, manual: boolean): void {
     ? '返回森林'
     : report.kind === 'player-extinct'
       ? '继续观察森林'
-      : '进入长期演替'
+      : report.kind === 'mission'
+        ? '继续沙盒观察'
+        : '进入长期演替'
+  const retryButton = document.querySelector<HTMLButtonElement>('#retry-seed-button')!
+  retryButton.hidden = manual || report.kind === 'checkpoint'
   document.querySelector<HTMLElement>('#report-modal')!.classList.remove('hidden')
   reportChart?.dispose()
   reportChart = echarts.init(document.querySelector<HTMLDivElement>('#report-chart')!, undefined, { renderer: 'canvas' })
@@ -1571,4 +1773,25 @@ function setText(id: string, value: string | number): void {
 function restart(): void {
   if (uiInterval !== null) window.clearInterval(uiInterval)
   window.location.reload()
+}
+
+function retrySameSeed(): void {
+  if (!simulation) return
+  const seed = simulation.seed
+  if (uiInterval !== null) {
+    window.clearInterval(uiInterval)
+    uiInterval = null
+  }
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  chart?.dispose()
+  chart = null
+  reportChart?.dispose()
+  reportChart = null
+  game?.destroy(true)
+  game = null
+  forestScene = null
+  reportShownFor = null
+  manualReportWasPaused = null
+  startGame(seed)
 }

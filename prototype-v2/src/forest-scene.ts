@@ -819,12 +819,27 @@ export class ForestScene extends Phaser.Scene {
       this.warningLayer.fillRect(0, 0, MAP_PIXEL_WIDTH, MAP_PIXEL_HEIGHT)
       this.warningLayer.strokeRect(2, 2, MAP_PIXEL_WIDTH - 4, MAP_PIXEL_HEIGHT - 4)
     } else {
-      const x = this.toCanvasX(warning.x)
-      const y = this.toCanvasY(warning.y)
+      const directionX = Math.cos(warning.heading)
+      const directionY = Math.sin(warning.heading)
+      const halfLength = warning.radius * 1.4
+      const halfWidth = warning.radius * 0.45
+      const corners = [
+        [warning.x - directionX * halfLength - directionY * halfWidth, warning.y - directionY * halfLength + directionX * halfWidth],
+        [warning.x + directionX * halfLength - directionY * halfWidth, warning.y + directionY * halfLength + directionX * halfWidth],
+        [warning.x + directionX * halfLength + directionY * halfWidth, warning.y + directionY * halfLength - directionX * halfWidth],
+        [warning.x - directionX * halfLength + directionY * halfWidth, warning.y - directionY * halfLength - directionX * halfWidth],
+      ].map(([x, y]) => new Phaser.Math.Vector2(this.toCanvasX(x), this.toCanvasY(y)))
       this.warningLayer.fillStyle(0x9d6555, alpha)
       this.warningLayer.lineStyle(2, 0xe6b39b, 0.72)
-      this.warningLayer.fillCircle(x, y, warning.radius * MAP_PIXEL_WIDTH)
-      this.warningLayer.strokeCircle(x, y, warning.radius * MAP_PIXEL_WIDTH)
+      this.warningLayer.fillPoints(corners, true)
+      this.warningLayer.strokePoints(corners, true)
+      this.warningLayer.lineStyle(3, 0xffd1b8, 0.85)
+      this.warningLayer.lineBetween(
+        this.toCanvasX(warning.x - directionX * halfLength),
+        this.toCanvasY(warning.y - directionY * halfLength),
+        this.toCanvasX(warning.x + directionX * halfLength),
+        this.toCanvasY(warning.y + directionY * halfLength),
+      )
     }
   }
 

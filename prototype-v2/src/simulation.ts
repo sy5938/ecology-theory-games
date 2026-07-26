@@ -15,6 +15,7 @@ export type AllocationKey = 'growth' | 'reproduction' | 'reserve'
 export type ScenarioId = 'closed' | 'sparse' | 'colonization'
 export type ViewLayer = 'all' | 'canopy' | 'understory'
 export type ActiveAbility = 'defense' | 'mast' | 'disperse' | 'nursery'
+export type StrategyPredictionKey = 'recruitment' | 'canopy' | 'resilience'
 export type DeathCause =
   | 'light'
   | 'competition'
@@ -34,6 +35,9 @@ export interface ScenarioDefinition {
   coverHint: string
   lightHint: string
   defaultDensity: number
+  objective: string
+  objectiveHint: string
+  targetYear: number
 }
 
 export const SCENARIOS: Record<ScenarioId, ScenarioDefinition> = {
@@ -45,6 +49,9 @@ export const SCENARIOS: Record<ScenarioId, ScenarioDefinition> = {
     coverHint: '默认高林冠覆盖',
     lightHint: '自定义密度会改变林下光照',
     defaultDensity: 30,
+    objective: '守住幼苗库，等到林窗释放',
+    objectiveHint: '第 30 年仍保有幼苗与幼树，并让至少 5 株幼树经历林窗释放。',
+    targetYear: 30,
   },
   sparse: {
     id: 'sparse',
@@ -54,6 +61,9 @@ export const SCENARIOS: Record<ScenarioId, ScenarioDefinition> = {
     coverHint: '默认低林冠覆盖',
     lightHint: '自定义密度会改变林下光照',
     defaultDensity: 15,
+    objective: '形成稳定冠层',
+    objectiveHint: '第 30 年让至少 8 个玩家个体进入林冠。',
+    targetYear: 30,
   },
   colonization: {
     id: 'colonization',
@@ -63,6 +73,9 @@ export const SCENARIOS: Record<ScenarioId, ScenarioDefinition> = {
     coverHint: '无玩家成树',
     lightHint: '稀疏背景，平均光照偏高',
     defaultDensity: 10,
+    objective: '建立多个定殖斑块',
+    objectiveHint: '第 20 年让玩家幼体占据至少 8 个十米网格。',
+    targetYear: 20,
   },
 }
 
@@ -91,6 +104,8 @@ export interface Individual {
   deathCause: DeathCause | null
   previousLight: number
   releaseUntil: number
+  structuralDamage: number
+  defoliationUntil: number
 }
 
 export interface SimulationOptions {
@@ -133,6 +148,7 @@ export interface SpeciesState {
   nurseryCooldownUntil: number
   cumulativeCarbonSequestered: number
   carbonAtLastHistory: number
+  insectOutbreakUntil: number
 }
 
 export type DisturbanceType = 'typhoon' | 'rainstorm'
@@ -143,12 +159,78 @@ export interface DisturbanceWarning {
   y: number
   radius: number
   happensAt: number
+  intensity: number
+  heading: number
 }
 
 export interface PestWarning {
   speciesCode: string
   warningAt: number
   happensAt: number
+  risk: number
+}
+
+export interface MissionStatus {
+  title: string
+  instruction: string
+  progress: number
+  progressLabel: string
+  targetYear: number
+}
+
+export interface StrategyCycleMetrics {
+  population: number
+  juveniles: number
+  adults: number
+  canopy: number
+  releases: number
+  reserve: number
+  averageHealth: number
+}
+
+export interface StrategyPrediction {
+  key: StrategyPredictionKey
+  label: string
+  target: string
+}
+
+export interface StrategyCycleReview {
+  cycle: number
+  startedAt: number
+  endedAt: number
+  plannedUntil: number
+  endedEarly: boolean
+  allocation: Allocation
+  prediction: StrategyPrediction
+  predictionMet: boolean
+  evidence: string[]
+  before: StrategyCycleMetrics
+  after: StrategyCycleMetrics
+  changes: StrategyCycleMetrics
+  turningPoints: EventEntry[]
+}
+
+export interface StrategyCommitStatus {
+  available: boolean
+  early: boolean
+  cost: number
+  yearsRemaining: number
+  reason: string
+}
+
+export interface StrategyCommitResult {
+  ok: boolean
+  message: string
+  cost: number
+}
+
+export interface MissionEvaluation {
+  score: number
+  grade: '繁盛' | '稳住生态位' | '险中维持' | '目标未完成'
+  objective: number
+  health: number
+  stageContinuity: number
+  resilience: number
 }
 
 export interface HistorySample {
@@ -295,6 +377,8 @@ export interface IndividualSnapshot {
   competitionPressure: number
   pathogenPressure: number
   insectPressure: number
+  structuralDamage: number
+  defoliationUntil: number
   carbonReserve: number
   deathCause: DeathCause | ''
 }
@@ -310,8 +394,9 @@ export interface OutcomeReport {
   turningPoints: EventEntry[]
   terminal: boolean
   canContinue: boolean
-  kind: 'checkpoint' | 'player-extinct' | 'community-extinct'
+  kind: 'mission' | 'checkpoint' | 'player-extinct' | 'community-extinct'
   year: number
+  mission?: MissionEvaluation
 }
 
 const STAGES: Stage[] = ['seed', 'seedling', 'sapling', 'adult']
@@ -384,6 +469,7 @@ export class ForestSimulation {
   readonly fiveYearSummaries: FiveYearSummary[] = []
   readonly deaths: DeathRecord[] = []
   readonly individualSnapshots: IndividualSnapshot[] = []
+  readonly strategyReviews: StrategyCycleReview[] = []
   readonly seed: number
   readonly densityPer400m2: number
   readonly initialCommunitySize: number
@@ -401,6 +487,8 @@ export class ForestSimulation {
   lightRevision = 0
   longTermUnlocked = false
   initialCanopyCover = 0
+  strategyLockedUntil = 0
+  strategyReview: StrategyCycleReview | null = null
 
   private readonly random: SeededRandom
   private nextId = 1
@@ -408,6 +496,7 @@ export class ForestSimulation {
   private nextHistoryYear = 1
   private nextSnapshotYear = 2
   private firstCheckpointShown = false
+  private missionCheckpointShown = false
   private nextDisturbanceAt: number
   private warningIssued = false
   private pestCooldownUntil = 0
@@ -416,6 +505,17 @@ export class ForestSimulation {
   private playerExtinctionShown = false
   private communityExtinctionShown = false
   private canopyCoverValue = 0
+  private strategyCycleIndex = 0
+  private readonly releasedPlayerIds = new Set<number>()
+  private strategyCycleBaseline: {
+    cycle: number
+    startedAt: number
+    plannedUntil: number
+    allocation: Allocation
+    prediction: StrategyPrediction
+    metrics: StrategyCycleMetrics
+    eventIndex: number
+  } | null = null
 
   constructor(
     allSpecies: Species[],
@@ -457,6 +557,7 @@ export class ForestSimulation {
         nurseryCooldownUntil: 0,
         cumulativeCarbonSequestered: 0,
         carbonAtLastHistory: 0,
+        insectOutbreakUntil: 0,
       })
       this.dominanceYears.set(species.code, 0)
     }
@@ -512,19 +613,250 @@ export class ForestSimulation {
     return { ...this.states.get(this.playerCode)!.allocation }
   }
 
+  get hasCommittedStrategy(): boolean {
+    return this.strategyCycleBaseline !== null || this.strategyReviews.length > 0
+  }
+
+  get currentStrategyPrediction(): StrategyPrediction | null {
+    return this.strategyCycleBaseline ? { ...this.strategyCycleBaseline.prediction } : null
+  }
+
+  get releasedPlayerCount(): number {
+    return this.releasedPlayerIds.size
+  }
+
   setAllocation(allocation: Allocation): void {
     if (this.population(this.playerCode).length === 0) return
+    const normalized = this.normalizeAllocation(allocation)
+    if (!normalized) return
+    this.states.get(this.playerCode)!.allocation = normalized
+    this.addEvent(
+      `重新平衡：生长 ${Math.round(normalized.growth * 100)}% · 繁殖 ${Math.round(normalized.reproduction * 100)}% · 储备 ${Math.round(normalized.reserve * 100)}%`,
+      'neutral',
+      'strategy',
+    )
+  }
+
+  strategyCommitStatus(): StrategyCommitStatus {
+    if (this.population(this.playerCode).length === 0) {
+      return { available: false, early: false, cost: 0, yearsRemaining: 0, reason: '玩家物种已经灭绝。' }
+    }
+    if (!this.strategyCycleBaseline || this.forestYear + 1e-6 >= this.strategyLockedUntil) {
+      return { available: true, early: false, cost: 0, yearsRemaining: 0, reason: '可以承诺下一个五年策略周期。' }
+    }
+    const yearsRemaining = Math.max(0, this.strategyLockedUntil - this.forestYear)
+    const emergency = this.warning !== null || this.pestWarning !== null
+    const cost = emergency ? 6 : 0
+    if (emergency && this.playerState.reserve >= cost) {
+      return {
+        available: true,
+        early: true,
+        cost,
+        yearsRemaining,
+        reason: `风险预警允许提前改策，但需消耗 ${cost} 碳储备。`,
+      }
+    }
+    return {
+      available: false,
+      early: false,
+      cost,
+      yearsRemaining,
+      reason: emergency
+        ? `储备不足 ${cost}，无法在风险预警下提前改策。`
+        : `策略仍需执行 ${yearsRemaining.toFixed(1)} 年；出现风险预警时可付出代价提前调整。`,
+    }
+  }
+
+  commitPlayerStrategy(
+    allocation: Allocation,
+    predictionKey: StrategyPredictionKey = 'recruitment',
+  ): StrategyCommitResult {
+    const normalized = this.normalizeAllocation(allocation)
+    if (!normalized) return { ok: false, message: '策略比例必须大于零。', cost: 0 }
+    const status = this.strategyCommitStatus()
+    if (!status.available) return { ok: false, message: status.reason, cost: 0 }
+    let interruptedReview: StrategyCycleReview | null = null
+    if (status.early && this.strategyCycleBaseline) {
+      interruptedReview = this.completeStrategyCycle(true)
+      if (interruptedReview) {
+        this.strategyReviews.push(interruptedReview)
+        this.addEvent(
+          `第 ${interruptedReview.cycle} 周期因预警提前结束：原预测“${interruptedReview.prediction.target}”在中止时${interruptedReview.predictionMet ? '已达到' : '尚未达到'}；${interruptedReview.evidence[0]}`,
+          'warning',
+          'strategy',
+          'emergency',
+        )
+      }
+      this.states.get(this.playerCode)!.reserve -= status.cost
+    }
+    this.states.get(this.playerCode)!.allocation = normalized
+    this.strategyCycleIndex += 1
+    this.strategyLockedUntil = this.forestYear + 5
+    this.strategyCycleBaseline = {
+      cycle: this.strategyCycleIndex,
+      startedAt: this.forestYear,
+      plannedUntil: this.strategyLockedUntil,
+      allocation: { ...normalized },
+      prediction: this.strategyPrediction(predictionKey),
+      metrics: this.strategyCycleMetrics(),
+      eventIndex: this.events.length,
+    }
+    this.strategyReview = null
+    this.addEvent(
+      `${status.early ? `支付 ${status.cost} 储备提前改策` : '五年策略承诺'}：生长 ${Math.round(normalized.growth * 100)}% · 繁殖 ${Math.round(normalized.reproduction * 100)}% · 储备 ${Math.round(normalized.reserve * 100)}%；预测“${this.strategyCycleBaseline.prediction.target}”，执行至第 ${this.strategyLockedUntil.toFixed(1)} 年。`,
+      status.early ? 'warning' : 'good',
+      'strategy',
+      status.early ? 'emergency' : 'routine',
+    )
+    return {
+      ok: true,
+      cost: status.cost,
+      message: status.early
+        ? `已支付 ${status.cost} 储备并重新承诺五年策略；被中止周期已写入事件与复盘记录。`
+        : `策略已锁定至第 ${this.strategyLockedUntil.toFixed(1)} 年。`,
+    }
+  }
+
+  missionEvaluation(): MissionEvaluation {
+    const population = this.population(this.playerCode)
+    if (population.length === 0) {
+      return {
+        score: 0,
+        grade: '目标未完成',
+        objective: 0,
+        health: 0,
+        stageContinuity: 0,
+        resilience: 0,
+      }
+    }
+    const objective = this.missionStatus().progress
+    const health = this.average(population.map((individual) => individual.health))
+    const stageContinuity = new Set(population.map((individual) => individual.stage)).size / STAGES.length
+    const reserveTarget = Math.max(12, population.length * 0.12)
+    const resilience = Math.min(1, this.playerState.reserve / reserveTarget)
+    const score = Math.round((objective * 0.65 + health * 0.15 + stageContinuity * 0.1 + resilience * 0.1) * 100)
+    const grade = score >= 85
+      ? '繁盛'
+      : score >= 65
+        ? '稳住生态位'
+        : score >= 40
+          ? '险中维持'
+          : '目标未完成'
+    return { score, grade, objective, health, stageContinuity, resilience }
+  }
+
+  private normalizeAllocation(allocation: Allocation): Allocation | null {
     const total = allocation.growth + allocation.reproduction + allocation.reserve
-    if (total <= 0) return
-    this.states.get(this.playerCode)!.allocation = {
+    if (total <= 0) return null
+    return {
       growth: allocation.growth / total,
       reproduction: allocation.reproduction / total,
       reserve: allocation.reserve / total,
     }
+  }
+
+  private strategyPrediction(key: StrategyPredictionKey): StrategyPrediction {
+    if (key === 'canopy') {
+      return { key, label: '抢到上层空间', target: '新增至少 1 个林冠个体' }
+    }
+    if (key === 'resilience') {
+      return { key, label: '守住风险缓冲', target: '储备不下降，且平均健康下降不超过 5%' }
+    }
+    return { key: 'recruitment', label: '扩大下一代', target: '幼苗与幼树净增至少 5 个' }
+  }
+
+  private strategyCycleMetrics(): StrategyCycleMetrics {
+    const population = this.population(this.playerCode)
+    return {
+      population: population.length,
+      juveniles: population.filter((individual) => individual.stage === 'seedling' || individual.stage === 'sapling').length,
+      adults: population.filter((individual) => individual.stage === 'adult').length,
+      canopy: population.filter((individual) => individual.canopy).length,
+      releases: this.releasedPlayerIds.size,
+      reserve: this.playerState.reserve,
+      averageHealth: this.average(population.map((individual) => individual.health)),
+    }
+  }
+
+  private completeStrategyCycle(endedEarly: boolean): StrategyCycleReview | null {
+    const baseline = this.strategyCycleBaseline
+    if (!baseline) return null
+    const after = this.strategyCycleMetrics()
+    const changes: StrategyCycleMetrics = {
+      population: after.population - baseline.metrics.population,
+      juveniles: after.juveniles - baseline.metrics.juveniles,
+      adults: after.adults - baseline.metrics.adults,
+      canopy: after.canopy - baseline.metrics.canopy,
+      releases: after.releases - baseline.metrics.releases,
+      reserve: after.reserve - baseline.metrics.reserve,
+      averageHealth: after.averageHealth - baseline.metrics.averageHealth,
+    }
+    const playerDeaths = this.deaths.filter((death) => (
+      death.speciesCode === this.playerCode &&
+      death.time > baseline.startedAt + 1e-6 &&
+      death.time <= this.forestYear + 1e-6
+    )).length
+    const inferredBirths = Math.max(0, changes.population + playerDeaths)
+    const predictionMet = baseline.prediction.key === 'canopy'
+      ? changes.canopy >= 1
+      : baseline.prediction.key === 'resilience'
+        ? changes.reserve >= 0 && changes.averageHealth >= -0.05
+        : changes.juveniles >= 5
+    const turningPoints = this.events
+      .slice(baseline.eventIndex)
+      .filter((event) => event.category === 'disturbance' || event.category === 'pest' || event.priority === 'emergency')
+      .slice(-4)
+    const mainCause = baseline.prediction.key === 'canopy'
+      ? predictionMet
+        ? `主因判断：${Math.round(baseline.allocation.growth * 100)}% 生长投入与林窗条件共同支持了林冠净增加。`
+        : `主因判断：林冠净变化 ${changes.canopy >= 0 ? '+' : ''}${changes.canopy}；${turningPoints.length > 0 ? '周期内扰动/虫害转折抵消了结构增长' : `${Math.round(baseline.allocation.growth * 100)}% 生长投入未能在现有光照竞争下转成新林冠`}。`
+      : baseline.prediction.key === 'resilience'
+        ? predictionMet
+          ? `主因判断：${Math.round(baseline.allocation.reserve * 100)}% 储备投入把碳盈余转成缓冲，并守住了平均健康。`
+          : `主因判断：储备 ${changes.reserve >= 0 ? '+' : ''}${changes.reserve.toFixed(1)}、健康 ${changes.averageHealth >= 0 ? '+' : ''}${Math.round(changes.averageHealth * 100)} 个百分点，至少一项跌破预测阈值。`
+        : predictionMet
+          ? `主因判断：${Math.round(baseline.allocation.reproduction * 100)}% 繁殖投入和建立条件使幼体净增 ${changes.juveniles}。`
+          : `主因判断：新增约 ${inferredBirths} 个但死亡 ${playerDeaths} 个，幼体净增 ${changes.juveniles}，未达到 +5 阈值。`
+    const evidence = [
+      mainCause,
+      `人口账：新增约 ${inferredBirths} 个，死亡 ${playerDeaths} 个，净变化 ${changes.population >= 0 ? '+' : ''}${changes.population}。`,
+      changes.releases > 0
+        ? `林窗账：${changes.releases} 株玩家幼树获得至少 20% 的光照跃升，进入 3 年释放期。`
+        : '林窗账：本周期没有玩家幼树达到 20% 光照跃升，尚未形成可利用的释放机会。',
+      `风险账：储备 ${changes.reserve >= 0 ? '+' : ''}${changes.reserve.toFixed(1)}，平均健康 ${changes.averageHealth >= 0 ? '+' : ''}${Math.round(changes.averageHealth * 100)} 个百分点。`,
+    ]
+    const review: StrategyCycleReview = {
+      cycle: baseline.cycle,
+      startedAt: baseline.startedAt,
+      endedAt: this.forestYear,
+      plannedUntil: baseline.plannedUntil,
+      endedEarly,
+      allocation: { ...baseline.allocation },
+      prediction: { ...baseline.prediction },
+      predictionMet,
+      evidence,
+      before: baseline.metrics,
+      after,
+      changes,
+      turningPoints,
+    }
+    this.strategyCycleBaseline = null
+    return review
+  }
+
+  private updateStrategyCycle(): void {
+    if (!this.strategyCycleBaseline || this.strategyReview) return
+    if (this.forestYear + 1e-6 < this.strategyLockedUntil) return
+    const review = this.completeStrategyCycle(false)
+    if (!review) return
+    this.strategyReviews.push(review)
+    this.strategyReview = review
+    this.paused = true
     this.addEvent(
-      `重新平衡：生长 ${Math.round((allocation.growth / total) * 100)}% · 繁殖 ${Math.round((allocation.reproduction / total) * 100)}% · 储备 ${Math.round((allocation.reserve / total) * 100)}%`,
-      'neutral',
+      `第 ${review.cycle} 个五年策略周期结束：种群 ${review.changes.population >= 0 ? '+' : ''}${review.changes.population}，幼体 ${review.changes.juveniles >= 0 ? '+' : ''}${review.changes.juveniles}，储备 ${review.changes.reserve >= 0 ? '+' : ''}${review.changes.reserve.toFixed(1)}。`,
+      review.changes.population < 0 ? 'warning' : 'good',
       'strategy',
+      'emergency',
     )
   }
 
@@ -736,7 +1068,50 @@ export class ForestSimulation {
   }
 
   lightHealthEffectAt(individual: Individual): number {
-    return this.lightHealthEffect(individual.species.strategy, this.lightAt(individual.x, individual.y))
+    return this.lightHealthEffect(individual.species, this.lightAt(individual.x, individual.y))
+  }
+
+  missionStatus(): MissionStatus {
+    const scenario = SCENARIOS[this.scenarioId]
+    const player = this.population(this.playerCode)
+    if (this.scenarioId === 'closed') {
+      const juveniles = player.filter((individual) => individual.stage === 'seedling' || individual.stage === 'sapling')
+      const stages = new Set(juveniles.map((individual) => individual.stage))
+      const viability = Math.min(1, stages.size / 2) * Math.min(1, juveniles.length / 12)
+      const releaseProgress = Math.min(1, this.releasedPlayerIds.size / 5)
+      const initialSample = this.speciesHistory.find((sample) => sample.time === 0 && sample.speciesCode === this.playerCode)
+      const initialJuveniles = (initialSample?.seedlings ?? 0) + (initialSample?.saplings ?? 0)
+      const juvenileChange = juveniles.length - initialJuveniles
+      return {
+        title: scenario.objective,
+        instruction: scenario.objectiveHint,
+        progress: viability * 0.5 + releaseProgress * 0.5,
+        progressLabel: `${juveniles.length} 个幼体（较开局 ${juvenileChange >= 0 ? '+' : ''}${juvenileChange}）· ${this.releasedPlayerIds.size} / 5 株完成释放`,
+        targetYear: scenario.targetYear,
+      }
+    }
+    if (this.scenarioId === 'sparse') {
+      const canopy = player.filter((individual) => individual.canopy).length
+      return {
+        title: scenario.objective,
+        instruction: scenario.objectiveHint,
+        progress: Math.min(1, canopy / 8),
+        progressLabel: `${canopy} / 8 个林冠个体`,
+        targetYear: scenario.targetYear,
+      }
+    }
+    const occupiedCells = new Set(
+      player
+        .filter((individual) => individual.stage !== 'seed')
+        .map((individual) => `${Math.floor(individual.x * 10)}:${Math.floor(individual.y * 10)}`),
+    ).size
+    return {
+      title: scenario.objective,
+      instruction: scenario.objectiveHint,
+      progress: Math.min(1, occupiedCells / 8),
+      progressLabel: `${occupiedCells} / 8 个定殖网格`,
+      targetYear: scenario.targetYear,
+    }
   }
 
   private chooseSpecies(allSpecies: Species[], playerCode: string): Species[] {
@@ -868,11 +1243,13 @@ export class ForestSimulation {
       deathCause: null,
       previousLight: 0.7,
       releaseUntil: 0,
+      structuralDamage: 0,
+      defoliationUntil: 0,
     }
   }
 
   maturityHeight(species: Species): number {
-    return Math.min(5, species.maxHeight * 0.6)
+    return Math.max(0.8, Math.min(5, species.maxHeight * species.profile.maturityFraction))
   }
 
   private initialDbhScale(): number {
@@ -889,6 +1266,7 @@ export class ForestSimulation {
     this.applyEstablishmentAndMortality()
     this.collectDead()
     this.recalculateCanopyAndLight()
+    this.updateStrategyCycle()
     this.revision += 1
 
     while (this.forestYear + 1e-6 >= this.nextHistoryYear) {
@@ -913,6 +1291,12 @@ export class ForestSimulation {
       this.addEvent('玩家物种已经灭绝，可以继续观察其余群落演替。', 'bad', 'process', 'emergency')
       this.paused = true
       this.report = this.buildOutcomeReport('player-extinct')
+      return
+    }
+    if (!this.missionCheckpointShown && this.forestYear >= SCENARIOS[this.scenarioId].targetYear) {
+      this.missionCheckpointShown = true
+      this.paused = true
+      this.report = this.buildOutcomeReport('mission')
       return
     }
     if (!this.firstCheckpointShown && this.forestYear >= FIRST_CHECKPOINT_YEAR) {
@@ -948,53 +1332,75 @@ export class ForestSimulation {
       const light = this.lightAt(individual.x, individual.y)
       const leafScale = { seedling: 0.13, sapling: 0.48, adult: 1 }[individual.stage as Exclude<Stage, 'seed'>]
       const structure = 0.45 + 0.55 * Math.min(1, individual.height / (individual.species.maxHeight * 0.55))
-      return sum + leafScale * structure * this.lightResponse(state.species.strategy, light) * 0.92
+      const herbivoryModifier = 1 - individual.insectPressure * 0.44
+      const stormModifier = 1 - individual.structuralDamage * 0.5 -
+        (individual.defoliationUntil > this.forestYear ? 0.28 : 0)
+      return sum + leafScale * structure * this.lightResponse(state.species, light) *
+        herbivoryModifier * Math.max(0.2, stormModifier) * 0.92
     }, 0)
-    state.cumulativeCarbonSequestered += state.income
+    state.cumulativeCarbonSequestered += state.income * FIXED_STEP_YEARS
+    const maintenanceStrategy = 0.95 - state.species.profile.lowLightSurvival * 0.52
     state.maintenance = population.reduce(
       (sum, individual) => sum + { seed: 0.003, seedling: 0.028, sapling: 0.115, adult: 0.28 }[individual.stage],
       0,
-    )
+    ) * maintenanceStrategy
     let available = state.income - state.maintenance
     let shortageRatio = 0
     if (available < 0) {
-      const deficit = -available
+      const deficit = -available * FIXED_STEP_YEARS
       const covered = Math.min(deficit, state.reserve)
       state.reserve -= covered
-      shortageRatio = state.maintenance > 0 ? (deficit - covered) / state.maintenance : 0
+      shortageRatio = state.maintenance > 0
+        ? (deficit - covered) / (state.maintenance * FIXED_STEP_YEARS)
+        : 0
       available = 0
     }
     state.surplus = available
+    const stepAvailable = available * FIXED_STEP_YEARS
+    // Growth and fecundity are calibrated response intensities per fixed tick.
+    // Stored carbon is a stock, so only reserve integrates the annual surplus by elapsed years.
     const growthPool = available * state.allocation.growth
     const reproductionPool = available * state.allocation.reproduction
-    state.reserve = Math.min(300, state.reserve + available * state.allocation.reserve)
+    state.reserve = Math.min(300, state.reserve + stepAvailable * state.allocation.reserve)
     if (active.length > 0 && growthPool > 0) {
       const perIndividual = growthPool / active.length
       for (const individual of active) {
-        const response = this.lightResponse(state.species.strategy, this.lightAt(individual.x, individual.y))
+        const response = this.lightResponse(state.species, this.lightAt(individual.x, individual.y))
         const stageBoost = individual.stage === 'adult' ? 0.28 : individual.stage === 'sapling' ? 0.75 : 1
         const competitionModifier = 1 - individual.competitionPressure * 0.55
         const releaseBoost = gapReleaseMultiplier(
           individual.species.strategy,
           individual.releaseUntil > this.forestYear,
-        )
-        const pioneerBoost = state.species.strategy === 'sun' && individual.stage !== 'adult' ? 1.35 : 1
-        const heightGain = perIndividual * state.species.maxHeight * 0.028 * response * stageBoost * competitionModifier * releaseBoost * pioneerBoost
+        ) * (individual.releaseUntil > this.forestYear ? 0.72 + state.species.profile.recovery * 0.46 : 1)
+        const pioneerBoost = state.species.strategy === 'sun' && individual.stage !== 'adult' ? 1.16 : 1
+        const damageModifier = Math.max(0.42, 1 - individual.structuralDamage * 0.65)
+        const heightGain = perIndividual * state.species.maxHeight * 0.028 * response * stageBoost *
+          competitionModifier * releaseBoost * pioneerBoost * state.species.profile.growthRate * damageModifier
         individual.height = Math.min(state.species.maxHeight, individual.height + heightGain)
         individual.dbh += heightGain * 1.55
       }
     }
-    const fecundity = state.species.strategy === 'sun' ? 2.6 : state.species.strategy === 'shade' ? 0.8 : 1
-    state.reproductionCredit += reproductionPool * fecundity
+    for (const individual of active) {
+      const recoveryInvestment = 0.45 + state.allocation.growth * 0.8 + state.allocation.reserve * 0.35
+      individual.structuralDamage = Math.max(
+        0,
+        individual.structuralDamage - state.species.profile.recovery * recoveryInvestment * 0.004,
+      )
+    }
+    const adultInsectPressure = this.average(
+      population.filter((individual) => individual.stage === 'adult').map((individual) => individual.insectPressure),
+    )
+    const fecundity = 0.75 + state.species.profile.seedOutput * 0.7
+    state.reproductionCredit += reproductionPool * fecundity * (1 - adultInsectPressure * 0.58)
     const adults = population.filter((individual) => individual.stage === 'adult')
-    const seedCost = state.species.strategy === 'sun' ? 1.6 : state.species.strategy === 'shade' ? 5 : 3.5
-    const monthlyCap = state.species.strategy === 'sun' ? 10 : 6
+    const seedCost = 2.2 + state.species.profile.seedMass * 2.6
+    const monthlyCap = Math.round(5 + state.species.profile.seedOutput * 5)
     let seedsToCreate = Math.min(monthlyCap, Math.floor(state.reproductionCredit / seedCost))
     if (this.individuals.length >= this.maxIndividuals || adults.length === 0) seedsToCreate = 0
     state.reproductionCredit -= seedsToCreate * seedCost
     for (let count = 0; count < seedsToCreate; count += 1) this.createSeed(state.species, this.random.pick(adults))
     if (shortageRatio > 0) {
-      const shortageTolerance = state.species.strategy === 'shade' ? 0.45 : state.species.strategy === 'broad' ? 0.6 : 1
+      const shortageTolerance = 1.22 - state.species.profile.lowLightSurvival * 0.92
       for (const individual of population) this.damage(individual, shortageRatio * 0.035 * shortageTolerance, 'carbon')
     } else if (state.reserve > Math.max(5, population.length * 0.18)) {
       const damaged = population.filter((individual) => individual.health < 0.9)
@@ -1008,10 +1414,10 @@ export class ForestSimulation {
   private createSeed(species: Species, mother: Individual): void {
     if (this.individuals.length >= this.maxIndividuals) return
     const state = this.states.get(species.code)!
-    const baseTailChance = species.strategy === 'sun' ? 0.42 : species.strategy === 'shade' ? 0.08 : 0.18
+    const baseTailChance = 0.08 + species.profile.dispersal * 0.34
     const tailChance = Math.min(0.8, baseTailChance * (state.disperseUntil > this.forestYear ? 2 : 1))
-    const localMean = species.strategy === 'sun' ? 7 : species.strategy === 'shade' ? 4 : 5
-    const longMean = species.strategy === 'sun' ? 24 : species.strategy === 'shade' ? 12 : 17
+    const localMean = 2.5 + species.profile.dispersal * 5.5
+    const longMean = 8 + species.profile.dispersal * 19
     let nextX = mother.x
     let nextY = mother.y
     for (let attempt = 0; attempt < 24; attempt += 1) {
@@ -1053,7 +1459,7 @@ export class ForestSimulation {
         const nursery = state.nurseryUntil > this.forestYear ? 1.5 : 1
         const seedSelfThinning = Math.min(0.35, Math.max(0, neighbors.length - 4) * 0.0025)
         const establishment =
-          this.establishmentChance(individual.species.strategy, light) *
+          this.establishmentChance(individual.species, light) *
           (1 - individual.pathogenPressure * 0.65) *
           (1 - individual.competitionPressure * 0.7) * nursery
         if (this.random.next() < establishment) {
@@ -1075,11 +1481,8 @@ export class ForestSimulation {
       if (individual.stage === 'sapling' && individual.height >= this.maturityHeight(individual.species)) individual.stage = 'adult'
       if (individual.stage !== previousStage) this.recordIndividual(individual, true)
 
-      const strategySurvival = individual.species.strategy === 'shade'
-        ? individual.canopy ? 0.25 : 0.48
-        : individual.species.strategy === 'broad' ? 0.65 : 1
-      const lightEffect = this.lightHealthEffect(individual.species.strategy, light)
-      if (lightEffect < 0) this.damage(individual, -lightEffect * strategySurvival, 'light')
+      const lightEffect = this.lightHealthEffect(individual.species, light)
+      if (lightEffect < 0) this.damage(individual, -lightEffect, 'light')
       else individual.health = Math.min(0.95, individual.health + lightEffect)
       const defense = this.states.get(individual.species.code)!.defenseUntil > this.forestYear ? 0.5 : 1
       const nurseryProtection = this.states.get(individual.species.code)!.nurseryUntil > this.forestYear && individual.stage === 'seedling' ? 0.6 : 1
@@ -1091,12 +1494,15 @@ export class ForestSimulation {
         Math.max(0, neighbors.length - 6) * 0.0012 +
         Math.max(0, localBasalArea - 0.12) * 0.004
       ) * sizeDisadvantage
-      this.damage(individual, (individual.competitionPressure * competitionDamage + selfThinning) * strategySurvival * nurseryProtection, 'competition')
-      this.damage(individual, individual.pathogenPressure * pathogenDamage * defense * strategySurvival * nurseryProtection, 'pathogen')
-      if (individual.insectPressure > 0) this.damage(individual, individual.insectPressure * 0.0018 * defense, 'insect')
-      if (individual.ageYears > 95 && this.random.next() < 0.008 * strategySurvival) this.damage(individual, 2, 'senescence')
-      if (individual.stage === 'adult' && this.random.next() < 0.00025 * strategySurvival) this.damage(individual, 2, 'senescence')
-      if (individual.stage === 'sapling' && light - individual.previousLight >= 0.2) individual.releaseUntil = this.forestYear + 3
+      this.damage(individual, (individual.competitionPressure * competitionDamage + selfThinning) * nurseryProtection, 'competition')
+      this.damage(individual, individual.pathogenPressure * pathogenDamage * defense * nurseryProtection, 'pathogen')
+      if (individual.insectPressure > 0) this.damage(individual, individual.insectPressure * 0.0012 * defense, 'insect')
+      if (individual.ageYears > 95 && this.random.next() < 0.008) this.damage(individual, 2, 'senescence')
+      if (individual.stage === 'adult' && this.random.next() < 0.00025) this.damage(individual, 2, 'senescence')
+      if (individual.stage === 'sapling' && light - individual.previousLight >= 0.2) {
+        individual.releaseUntil = this.forestYear + 3
+        if (individual.species.code === this.playerCode) this.releasedPlayerIds.add(individual.id)
+      }
       individual.previousLight = light
       const lightRisk = lightEffect < 0 ? clamp01(-lightEffect / 0.006) : 0
       const healthRisk = clamp01((0.72 - individual.health) / 0.42)
@@ -1187,7 +1593,11 @@ export class ForestSimulation {
   }
 
   private crownRadius(individual: Individual): number {
-    const meters = Math.max(3.5, Math.min(7, 2.5 + individual.height * 0.18 + individual.dbh * 0.08))
+    const crownScale = 0.75 + individual.species.profile.crownScale * 0.25
+    const meters = Math.max(
+      3.2,
+      Math.min(7.4, (2.5 + individual.height * 0.18 + individual.dbh * 0.08) * crownScale),
+    )
     return meters / MAP_WIDTH_METERS
   }
 
@@ -1198,29 +1608,79 @@ export class ForestSimulation {
         type,
         x: type === 'typhoon' ? this.random.between(0.18, 0.82) : 0.5,
         y: type === 'typhoon' ? this.random.between(0.2, 0.8) : 0.5,
-        radius: type === 'typhoon' ? this.random.between(0.13, 0.19) : 1,
+        radius: type === 'typhoon' ? this.random.between(0.16, 0.24) : 1,
         happensAt: this.nextDisturbanceAt,
+        intensity: type === 'typhoon' ? this.random.between(0.58, 0.94) : this.random.between(0.45, 0.78),
+        heading: this.random.between(0, Math.PI * 2),
       }
       this.warningIssued = true
-      this.addEvent(type === 'typhoon' ? '台风预警：局部高树风险上升。' : '暴雨预警：全图个体将受到健康冲击。', 'warning', 'disturbance', 'emergency')
+      this.addEvent(
+        type === 'typhoon'
+          ? `台风预警：强度 ${Math.round(this.warning.intensity * 100)}%，路径附近冠层暴露上升。`
+          : '暴雨预警：全图个体将受到健康冲击。',
+        'warning',
+        'disturbance',
+        'emergency',
+      )
     }
     if (!this.warning || this.forestYear < this.warning.happensAt) return
     const warning = this.warning
     if (warning.type === 'typhoon') {
+      const directionX = Math.cos(warning.heading)
+      const directionY = Math.sin(warning.heading)
+      const halfLength = warning.radius * 1.4
+      const halfWidth = warning.radius * 0.45
       const affected = this.individuals.filter(
-        (individual) => individual.canopy && Math.hypot(individual.x - warning.x, individual.y - warning.y) < warning.radius,
+        (individual) => {
+          if (individual.stage === 'seed') return false
+          const dx = individual.x - warning.x
+          const dy = individual.y - warning.y
+          const alongPath = Math.abs(dx * directionX + dy * directionY)
+          const acrossPath = Math.abs(-dx * directionY + dy * directionX)
+          return alongPath < halfLength && acrossPath < halfWidth
+        },
       )
-      let deaths = 0
+      const outcomes = { defoliation: 0, branch: 0, snapped: 0, uprooted: 0 }
       for (const individual of affected) {
         const state = this.states.get(individual.species.code)!
         const buffer = Math.min(0.16, state.reserve / Math.max(1, this.population(individual.species.code).length) / 35)
-        const heightRisk = Math.min(0.32, Math.max(0, (individual.height - CANOPY_HEIGHT_METERS) * 0.012))
-        if (this.random.next() < 0.28 + heightRisk - buffer) {
+        const dx = individual.x - warning.x
+        const dy = individual.y - warning.y
+        const alongPath = Math.abs(dx * directionX + dy * directionY)
+        const acrossPath = Math.abs(-dx * directionY + dy * directionX)
+        const exposure = clamp01(1 - acrossPath / halfWidth) *
+          (0.7 + 0.3 * clamp01(1 - alongPath / halfLength))
+        const heightExposure = 0.35 + 0.65 * clamp01(individual.height / Math.max(4, individual.species.maxHeight))
+        const resistance = individual.species.profile.windResistance * 0.42 +
+          individual.species.profile.woodDensity * 0.18 + buffer
+        const severity = clamp01(warning.intensity * (0.42 + exposure * 0.58) * heightExposure - resistance * 0.52)
+        if (this.random.next() > 0.2 + severity * 0.88) continue
+        const outcome = this.random.next() + severity * 0.52
+        if (outcome < 0.58) {
+          individual.defoliationUntil = Math.max(individual.defoliationUntil, this.forestYear + 1.5)
+          individual.structuralDamage = Math.min(1, individual.structuralDamage + 0.08)
+          this.damage(individual, 0.035, 'typhoon')
+          outcomes.defoliation += 1
+        } else if (outcome < 0.94) {
+          individual.defoliationUntil = Math.max(individual.defoliationUntil, this.forestYear + 2.5)
+          individual.structuralDamage = Math.min(1, individual.structuralDamage + 0.28)
+          this.damage(individual, 0.12, 'typhoon')
+          outcomes.branch += 1
+        } else if (outcome < 1.24) {
           this.damage(individual, 2, 'typhoon')
-          deaths += 1
-        } else this.damage(individual, 0.24, 'typhoon')
+          outcomes.snapped += 1
+        } else {
+          this.damage(individual, 2, 'typhoon')
+          outcomes.uprooted += 1
+        }
       }
-      this.addEvent(`台风经过：${deaths} 棵冠层树倒伏，局部林窗形成。`, deaths > 0 ? 'bad' : 'neutral', 'disturbance', 'emergency')
+      const deaths = outcomes.snapped + outcomes.uprooted
+      this.addEvent(
+        `台风穿过：落叶 ${outcomes.defoliation}、断枝 ${outcomes.branch}、折干 ${outcomes.snapped}、倒伏 ${outcomes.uprooted}；损伤将按物种恢复力延续。`,
+        deaths > 0 ? 'bad' : outcomes.branch + outcomes.defoliation > 0 ? 'warning' : 'neutral',
+        'disturbance',
+        'emergency',
+      )
     } else {
       for (const individual of this.individuals) {
         const state = this.states.get(individual.species.code)!
@@ -1240,69 +1700,116 @@ export class ForestSimulation {
     const established = this.individuals.filter((individual) => individual.stage !== 'seed')
     if (established.length === 0) return
     for (const species of this.activeSpecies) {
-      const share = established.filter((individual) => individual.species.code === species.code).length / established.length
+      const hosts = established.filter((individual) => individual.species.code === species.code)
+      const share = hosts.length / established.length
+      const clustering = this.average(hosts.map((individual) => individual.pathogenPressure))
+      const susceptibility = 1 - species.profile.herbivoryDefense
+      const risk = clamp01(share * 0.72 + clustering * 0.34 + susceptibility * 0.22)
       const previous = this.dominanceYears.get(species.code) ?? 0
-      this.dominanceYears.set(species.code, share >= 0.45 ? previous + 1 : 0)
+      this.dominanceYears.set(species.code, risk >= 0.38 ? previous + 1 : Math.max(0, previous - 1))
       if ((this.dominanceYears.get(species.code) ?? 0) >= 5) {
-        this.pestWarning = { speciesCode: species.code, warningAt: year, happensAt: year + 3 }
-        this.addEvent(`专性虫害预警：${species.name} 长期占据优势，三年后可能暴发。`, 'warning', 'pest', 'emergency')
+        this.pestWarning = { speciesCode: species.code, warningAt: year, happensAt: year + 3, risk }
+        this.addEvent(
+          `虫食高压预警：${species.name} 的宿主优势与空间聚集使风险升至 ${Math.round(risk * 100)}%，三年后可能进入暴发期。`,
+          'warning',
+          'pest',
+          'emergency',
+        )
         break
       }
     }
   }
 
   private updatePestPressure(): void {
-    for (const individual of this.individuals) individual.insectPressure = 0
-    if (!this.pestWarning) return
-    const target = this.states.get(this.pestWarning.speciesCode)!.species
-    const progress = clamp01((this.forestYear - this.pestWarning.warningAt) / 3)
-    for (const individual of this.population(target.code)) individual.insectPressure = 0.35 + progress * 0.65
-    if (this.forestYear < this.pestWarning.happensAt) return
-    const state = this.states.get(target.code)!
-    const defended = state.defenseUntil > this.forestYear
-    const fraction = this.random.between(0.25, 0.45) * (defended ? 0.5 : 1)
-    let deaths = 0
-    for (const individual of this.population(target.code).filter((item) => item.stage !== 'seed')) {
-      if (this.random.next() < fraction) {
-        this.damage(individual, 2, 'insect')
-        deaths += 1
-      } else this.damage(individual, defended ? 0.15 : 0.3, 'insect')
+    const established = this.individuals.filter((individual) => individual.stage !== 'seed')
+    for (const species of this.activeSpecies) {
+      const hosts = established.filter((individual) => individual.species.code === species.code)
+      const share = established.length > 0 ? hosts.length / established.length : 0
+      const state = this.states.get(species.code)!
+      const defended = state.defenseUntil > this.forestYear
+      const outbreak = state.insectOutbreakUntil > this.forestYear
+      for (const individual of this.population(species.code)) {
+        if (individual.stage === 'seed') {
+          individual.insectPressure = 0
+          continue
+        }
+        const background = 0.025 + share * 0.28 + individual.pathogenPressure * 0.1
+        const defense = Math.min(0.82, species.profile.herbivoryDefense * 0.52 + (defended ? 0.3 : 0))
+        individual.insectPressure = clamp01(background * (1 - defense) + (outbreak ? 0.48 * (1 - defense) : 0))
+      }
     }
-    this.addEvent(`专性虫害暴发：${target.name} 死亡 ${deaths} 个体，优势格局被打破。`, 'bad', 'pest', 'emergency')
+    if (!this.pestWarning) return
+    const warning = this.pestWarning
+    const target = this.states.get(warning.speciesCode)!.species
+    const progress = clamp01((this.forestYear - warning.warningAt) / 3)
+    for (const individual of this.population(target.code).filter((item) => item.stage !== 'seed')) {
+      individual.insectPressure = clamp01(individual.insectPressure + 0.12 + progress * 0.22)
+    }
+    if (this.forestYear < warning.happensAt) return
+    const state = this.states.get(target.code)!
+    state.insectOutbreakUntil = this.forestYear + 4
+    const hosts = this.population(target.code).filter((item) => item.stage !== 'seed')
+    const defended = state.defenseUntil > this.forestYear
+    let severeLosses = 0
+    for (const individual of hosts) {
+      const severeRisk = (0.015 + warning.risk * 0.055) *
+        (1.15 - target.profile.herbivoryDefense * 0.55) * (defended ? 0.45 : 1)
+      if (this.random.next() < severeRisk) {
+        this.damage(individual, 2, 'insect')
+        severeLosses += 1
+      } else {
+        individual.insectPressure = clamp01(individual.insectPressure + 0.35)
+      }
+    }
+    if (severeLosses === 0 && hosts.length > 0 && warning.risk > 0.65) {
+      const weakest = [...hosts].sort((first, second) => first.health - second.health)[0]
+      this.damage(weakest, 2, 'insect')
+      severeLosses = 1
+    }
+    this.addEvent(
+      `虫食暴发：${target.name} 进入 4 年高压期，光合与繁殖先受抑制，${severeLosses} 个重损个体死亡。`,
+      'bad',
+      'pest',
+      'emergency',
+    )
     this.lastPestOutbreakYear = this.forestYear
     this.pestCooldownUntil = this.forestYear + 15
     this.dominanceYears.set(target.code, 0)
     this.pestWarning = null
   }
 
-  private lightResponse(strategy: Strategy, light: number): number {
-    if (strategy === 'sun') return Math.max(0.04, (light - 0.1) * 1.34)
-    if (strategy === 'shade') return 0.3 + light * 0.58
-    return 0.28 + light * 0.95
+  private lightResponse(species: Species, light: number): number {
+    const profile = species.profile
+    if (light <= profile.lightCompensation) {
+      const lowLightFraction = light / Math.max(0.01, profile.lightCompensation)
+      return 0.12 + lowLightFraction * profile.lowLightSurvival * 0.28
+    }
+    const usableRange = Math.max(0.05, profile.lightSaturation - profile.lightCompensation)
+    const saturation = clamp01((light - profile.lightCompensation) / usableRange)
+    return 0.12 + profile.maxAssimilation * (0.88 * saturation)
   }
 
-  private lightHealthEffect(strategy: Strategy, light: number): number {
-    if (strategy === 'sun') {
-      if (light < 0.35) return -(0.0015 + (0.35 - light) * 0.015)
-      if (light > 0.58) return 0.0008
-      return 0
+  private lightHealthEffect(species: Species, light: number): number {
+    const profile = species.profile
+    if (light < profile.lightCompensation) {
+      const deficit = (profile.lightCompensation - light) / Math.max(0.05, profile.lightCompensation)
+      return -(0.00045 + deficit * 0.006 * (1.08 - profile.lowLightSurvival))
     }
-    if (strategy === 'shade') {
-      if (light > 0.82) return -(0.0015 + (light - 0.82) * 0.018)
-      if (light < 0.07) return -0.0025
-      if (light <= 0.68) return 0.0006
-      return 0
+    const excessThreshold = Math.min(0.98, profile.lightSaturation + 0.2)
+    if (light > excessThreshold && species.strategy === 'shade') {
+      return -(0.0005 + (light - excessThreshold) * 0.007)
     }
-    if (light < 0.07) return -0.0015
-    if (light > 0.97) return -0.0015
-    if (light >= 0.1 && light <= 0.9) return 0.0006
-    return 0
+    return 0.00035 + profile.lowLightSurvival * 0.00025
   }
 
-  private establishmentChance(strategy: Strategy, light: number): number {
-    if (strategy === 'sun') return light > 0.5 ? 0.075 + light * 0.06 : 0.003
-    if (strategy === 'shade') return 0.026 + (1 - Math.abs(light - 0.3)) * 0.042
-    return 0.025 + light * 0.048
+  private establishmentChance(species: Species, light: number): number {
+    const profile = species.profile
+    const lightMatch = light < profile.lightCompensation
+      ? profile.lowLightSurvival * (light / Math.max(0.04, profile.lightCompensation))
+      : 0.65 + 0.35 * clamp01((light - profile.lightCompensation) /
+        Math.max(0.05, profile.lightSaturation - profile.lightCompensation))
+    const seedQuality = 0.55 + profile.seedMass * 0.45
+    return (0.018 + profile.establishment * 0.052) * lightMatch * seedQuality
   }
 
   private damage(individual: Individual, amount: number, cause: DeathCause): void {
@@ -1526,6 +2033,8 @@ export class ForestSimulation {
       competitionPressure: individual.competitionPressure,
       pathogenPressure: individual.pathogenPressure,
       insectPressure: individual.insectPressure,
+      structuralDamage: individual.structuralDamage,
+      defoliationUntil: individual.defoliationUntil,
       carbonReserve: this.states.get(individual.species.code)?.reserve ?? 0,
       deathCause,
     })
@@ -1542,9 +2051,11 @@ export class ForestSimulation {
     const trend = latest && tenYearsAgo ? latest.total - tenYearsAgo.total : 0
     const recentDeaths = this.deaths.filter((death) => death.time >= this.forestYear - 10)
     const insectDeaths = recentDeaths.filter((death) => death.cause === 'insect').length
+    const mission = kind === 'mission' ? this.missionEvaluation() : undefined
     let outcome = '当前格局：多物种共存'
     if (kind === 'community-extinct') outcome = '终局：整个群落灭绝'
     else if (kind === 'player-extinct') outcome = '玩家物种灭绝 · 可继续观察'
+    else if (mission) outcome = `情景结局：${mission.grade} · ${mission.score} 分`
     else if (insectDeaths > 5 && this.lastPestOutbreakYear >= this.forestYear - 10) outcome = '关键转折：优势种虫害暴发'
     else if (share >= 0.48) outcome = '当前格局：玩家物种占优势'
     else if (share < 0.08) outcome = '当前格局：低位维持'
@@ -1557,7 +2068,7 @@ export class ForestSimulation {
       dominantCause ? `过去 10 年最常见死亡原因：${this.deathCauseLabel(dominantCause)}。` : '过去 10 年没有形成单一主导死亡原因。',
     ]
     const futureRisks = [
-      this.pestWarning ? `${this.states.get(this.pestWarning.speciesCode)!.species.name} 的专性虫害将在约 ${Math.max(0, this.pestWarning.happensAt - this.forestYear).toFixed(1)} 年后暴发。` : '持续寡头化会积累专性虫害风险。',
+      this.pestWarning ? `${this.states.get(this.pestWarning.speciesCode)!.species.name} 的虫食高压期将在约 ${Math.max(0, this.pestWarning.happensAt - this.forestYear).toFixed(1)} 年后开始。` : '持续寡头化与空间聚集会积累虫食风险。',
       latest && latest.averageRisk >= 0.45 ? '风险个体比例偏高，应检查光照、竞争和病原压力。' : '当前综合风险中等，可继续观察下一次扰动。',
     ]
     const allocation = this.playerState.allocation
@@ -1572,11 +2083,30 @@ export class ForestSimulation {
         ? `诱导防御仍可持续 ${(this.playerState.defenseUntil - this.forestYear).toFixed(1)} 年。`
         : `当前碳储备 ${this.playerState.reserve.toFixed(1)}，可用于未来主动能力或资源短缺。`,
     ]
+    const latestReview = this.strategyReviews.at(-1)
+    if (mission && latestReview && Math.abs(latestReview.endedAt - this.forestYear) < 0.2) {
+      strategyImpacts.push(
+        `最终周期预测“${latestReview.prediction.target}”：${latestReview.predictionMet ? '命中' : '落空'}。`,
+        latestReview.evidence[0],
+        latestReview.evidence[1],
+      )
+    }
+    const missionDetails = mission
+      ? [
+          `本局目标 ${Math.round(mission.objective * 100)}% · 健康 ${Math.round(mission.health * 100)}%`,
+          `阶段连续性 ${Math.round(mission.stageContinuity * 100)}% · 韧性储备 ${Math.round(mission.resilience * 100)}%`,
+        ]
+      : []
     return {
-      title: `第 ${year} 年森林演替结算`,
+      title: kind === 'mission'
+        ? `第 ${year} 年 · ${SCENARIOS[this.scenarioId].name}情景结算`
+        : `第 ${year} 年森林演替结算`,
       outcome,
-      summary: `${this.playerSpecies.name} 占群落个体 ${Math.round(share * 100)}%，当前有 ${activeSpecies}/6 个物种存活。`,
+      summary: mission
+        ? `${this.playerSpecies.name} 的任务评分为 ${mission.score} 分（${mission.grade}）。同种子重试时，只改变策略即可比较因果。`
+        : `${this.playerSpecies.name} 占群落个体 ${Math.round(share * 100)}%，当前有 ${activeSpecies}/6 个物种存活。`,
       details: [
+        ...missionDetails,
         `存活个体 ${playerPopulation.length} · 过去 10 年 ${trend >= 0 ? '+' : ''}${trend}`,
         `平均健康 ${Math.round((latest?.averageHealth ?? 0) * 100)}% · 平均光照 ${Math.round((latest?.averageLight ?? 0) * 100)}%`,
         `竞争压力 ${Math.round((latest?.averageCompetitionPressure ?? 0) * 100)}% · 病原菌压力 ${Math.round((latest?.averagePathogenPressure ?? 0) * 100)}%`,
@@ -1593,6 +2123,7 @@ export class ForestSimulation {
       canContinue: kind !== 'community-extinct',
       kind,
       year,
+      mission,
     }
   }
 
