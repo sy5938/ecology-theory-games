@@ -33,6 +33,12 @@ async function finishSetup(page: Page): Promise<void> {
   await page.locator('#start-game').click()
 }
 
+async function chooseOpeningOpportunity(page: Page): Promise<void> {
+  const draft = page.locator('[data-opportunity-draft-container]:visible')
+  await expect(draft.locator('[data-opportunity-card]')).toHaveCount(3)
+  await draft.locator('[data-opportunity-card]').first().click()
+}
+
 test('five-step setup previews density and opens the guided forest UI', async ({ page }, testInfo) => {
   const browserErrors: string[] = []
   page.on('pageerror', (error) => browserErrors.push(error.message))
@@ -62,7 +68,11 @@ test('five-step setup previews density and opens the guided forest UI', async ({
   await expect(page.locator('.mission-panel')).toBeVisible()
   await expect(page.locator('#mission-title')).toHaveText('守住幼苗库，等到林窗释放')
   await expect(page.locator('#mission-progress-label')).toContainText('完成释放')
-  await expect(page.locator('#pause-button')).toHaveText('确认预测与策略并开始')
+  await expect(page.locator('#pause-button')).toHaveText('确认机缘、预测与策略并开始')
+  await expect(page.locator('[data-opportunity-draft-container]:visible [data-opportunity-card]')).toHaveCount(3)
+  await expect(page.locator('#pause-button')).toBeDisabled()
+  await page.screenshot({ path: testInfo.outputPath('opportunity-draft.png'), fullPage: true })
+  await chooseOpeningOpportunity(page)
   await expect(page.locator('#pause-button')).toBeDisabled()
   await page.locator('[data-allocation-preset="balanced"]').click()
   await expect(page.locator('[data-prediction="resilience"]')).toHaveClass(/active/)
@@ -121,11 +131,16 @@ test('five-year commitment pauses for a prediction verdict and a new mutually ex
   await chooseScenarioAndAdvance(page, 'closed')
   await finishSetup(page)
 
+  await chooseOpeningOpportunity(page)
   await page.locator('[data-allocation-preset="shade"]').click()
   await expect(page.locator('[data-prediction="resilience"]')).toHaveClass(/active/)
   await page.locator('#pause-button').click()
   for (const slider of await page.locator('[data-allocation]').all()) await expect(slider).toBeDisabled()
   await expect(page.locator('#strategy-lock-status')).toContainText('已锁定至第 5.0 年')
+  await expect(page.locator('#opportunity-slot')).toBeVisible()
+  await expect(page.locator('#play-opportunity-card')).toBeEnabled()
+  await page.locator('#play-opportunity-card').click()
+  await expect(page.locator('#play-opportunity-card')).toHaveText('本周期已使用')
   await page.locator('[data-speed="4"]').click()
 
   await expect(page.locator('#cycle-review-modal')).toBeVisible({ timeout: 20_000 })
@@ -133,6 +148,12 @@ test('five-year commitment pauses for a prediction verdict and a new mutually ex
   await expect(page.locator('#cycle-review-verdict')).toContainText('守住风险缓冲')
   await expect(page.locator('#cycle-review-events')).toContainText('人口账')
   await expect(page.locator('#cycle-review-events')).toContainText('林窗账')
+  await expect(page.locator('#cycle-review-events')).toContainText('机缘账')
+  const nextDraft = page.locator('#cycle-review-modal [data-opportunity-draft-root]')
+  await expect(nextDraft.locator('[data-opportunity-card]')).toHaveCount(3)
+  await expect(page.locator('[data-cycle-preset="pioneer"]')).toBeDisabled()
+  await nextDraft.locator('[data-opportunity-pass]').click()
+  await expect(page.locator('[data-cycle-preset="pioneer"]')).toBeEnabled()
 
   await page.locator('[data-cycle-preset="pioneer"]').click()
   await expect(page.locator('#cycle-review-modal')).toBeHidden()
@@ -351,6 +372,7 @@ test('map query is temporary and detailed statistics open on demand', async ({ p
   await page.goto('/')
   await chooseScenarioAndAdvance(page, 'sparse')
   await finishSetup(page)
+  await chooseOpeningOpportunity(page)
   await page.locator('[data-allocation-preset="balanced"]').click()
   await page.locator('#pause-button').click()
   await page.locator('[data-speed="4"]').click()
@@ -552,6 +574,7 @@ test('a 10,000-individual map stays interactive at at least 30 FPS', async ({ pa
   expect(await page.locator('#property-table-body tr').count()).toBeLessThanOrEqual(150)
   await page.locator('#close-properties-button').click()
 
+  await chooseOpeningOpportunity(page)
   await page.locator('[data-allocation-preset="balanced"]').click()
   await page.locator('#pause-button').click()
   await page.locator('[data-speed="4"]').click()

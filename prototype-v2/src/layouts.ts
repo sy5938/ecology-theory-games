@@ -136,7 +136,7 @@ const layerSidebar = `
 const simulationControls = `
   <section class="simulation-controls surface" data-tutorial-target="start">
     <div class="clock"><span id="game-time">第 0.0 年</span><small id="forest-phase">观察准备期</small></div>
-    <button class="primary-control" id="pause-button" type="button" disabled>确认预测与策略并开始</button>
+    <button class="primary-control" id="pause-button" type="button" disabled>确认机缘、预测与策略并开始</button>
     <div class="speed-group" aria-label="演化速度">
       <button type="button" data-speed="1" class="active">1×</button>
       <button type="button" data-speed="2">2×</button>
@@ -167,11 +167,15 @@ const allocationPanel = `
     <div class="panel-heading">
       <div><span class="label">你的生命史策略</span><strong id="allocation-impact">等待第一个生态时间步</strong></div>
       <div class="allocation-tools">
-        <div class="active-abilities" aria-label="主动能力">
-          <button type="button" data-ability="defense" title="消耗 18 储备，5 年内把自身病原和虫食伤害减半"><strong>诱导防御</strong><span id="defense-status">18 储备</span></button>
-          <button type="button" data-ability="mast" title="消耗 15 储备，把当期资源转成一次高数量种子脉冲"><strong>集中结实</strong><span id="mast-status">15 储备</span></button>
-          <button type="button" data-ability="disperse" title="消耗 12 储备，5 年内提高远距种子比例和扩散距离"><strong>远距播散</strong><span id="disperse-status">12 储备</span></button>
-          <button type="button" data-ability="nursery" title="消耗 15 储备，5 年内提高种子建立率并降低幼苗竞争伤害"><strong>幼苗保育</strong><span id="nursery-status">15 储备</span></button>
+        <div class="opportunity-area" aria-label="生态机缘牌">
+          <div class="opportunity-draft-panel" data-opportunity-draft-container>
+            <div><span class="label">本周期生态机缘 · 抽三选一</span><small>可放弃；未使用会在周期末过期</small></div>
+            <div class="opportunity-draft" data-opportunity-draft-root></div>
+          </div>
+          <div class="opportunity-slot hidden" id="opportunity-slot">
+            <div><span>本周期保留机缘</span><strong id="opportunity-slot-title">尚未选择</strong><small id="opportunity-slot-effect"></small></div>
+            <button type="button" id="play-opportunity-card">使用机缘</button>
+          </div>
         </div>
         <div class="allocation-presets" aria-label="快速策略">
           <button type="button" data-allocation-preset="balanced">均衡观察</button>
@@ -341,6 +345,10 @@ const overlays = `
       <section class="cycle-review-events">
         <span>因果证据与关键转折</span>
         <p id="cycle-review-events">环境相对平稳。</p>
+      </section>
+      <section class="cycle-opportunity-draft" data-opportunity-draft-container>
+        <div><span class="label">下一周期的随机机缘</span><strong>抽三选一，也可以放弃</strong></div>
+        <div class="opportunity-draft" data-opportunity-draft-root></div>
       </section>
       <section class="cycle-next-choice">
         <div><span class="label">下一周期只能选择一条主路线</span><strong>承诺后执行五年</strong></div>

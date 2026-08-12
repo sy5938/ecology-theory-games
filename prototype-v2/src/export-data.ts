@@ -117,7 +117,7 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
       'cycle', 'started_year', 'ended_year', 'ended_early', 'growth_allocation', 'reproduction_allocation',
       'reserve_allocation', 'prediction', 'prediction_target', 'prediction_met', 'population_change',
       'juvenile_change', 'canopy_change', 'release_change', 'reserve_change', 'average_health_change',
-      'causal_evidence',
+      'opportunity_selected', 'opportunity_used', 'opportunity_expired', 'opportunity_outcome', 'causal_evidence',
     ],
     simulation.strategyReviews.map((review) => [
       review.cycle, review.startedAt.toFixed(2), review.endedAt.toFixed(2), review.endedEarly,
@@ -125,13 +125,22 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
       review.allocation.reserve.toFixed(4), review.prediction.label, review.prediction.target,
       review.predictionMet, review.changes.population, review.changes.juveniles, review.changes.canopy,
       review.changes.releases, review.changes.reserve.toFixed(3), review.changes.averageHealth.toFixed(4),
+      review.opportunity?.selected ?? '', review.opportunity?.used ?? false,
+      review.opportunity?.expired ?? false, review.opportunity?.outcome ?? '',
       review.evidence.join(' | '),
+    ]),
+  )
+  const opportunityHistory = csv(
+    ['cycle', 'drawn_year', 'choices', 'selected', 'passed', 'used', 'used_year', 'expired', 'outcome'],
+    simulation.opportunityHistory.map((record) => [
+      record.cycle, record.drawnAt.toFixed(2), record.choices.join('|'), record.selected ?? '',
+      record.passed, record.used, record.usedAt?.toFixed(2) ?? '', record.expired, record.outcome,
     ]),
   )
   const report = simulation.report ?? simulation.createOutcomeReport()
   const metadata = {
-    schemaVersion: '4.3',
-    prototype: '像森林一样思考 V4.1',
+    schemaVersion: '4.4',
+    prototype: '像森林一样思考 V4.2',
     scenario: simulation.scenarioId,
     scenarioName: SCENARIOS[simulation.scenarioId].name,
     playerSpecies: simulation.playerSpecies,
@@ -139,6 +148,7 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
     mission: simulation.missionStatus(),
     missionEvaluation: simulation.missionEvaluation(),
     completedStrategyCycles: simulation.strategyReviews.length,
+    opportunityCardCycles: simulation.opportunityHistory.length,
     randomSeed: simulation.seed,
     exportedAtYear: simulation.forestYear,
     initialDensityPer400m2: simulation.densityPer400m2,
@@ -162,6 +172,7 @@ export function createExportArchive(simulation: ForestSimulation): Blob {
       'events.csv': strToU8(events),
       'species_profiles.csv': strToU8(speciesProfiles),
       'strategy_reviews.csv': strToU8(strategyReviews),
+      'opportunity_history.csv': strToU8(opportunityHistory),
       'report.json': strToU8(JSON.stringify(report, null, 2)),
       'metadata.json': strToU8(JSON.stringify(metadata, null, 2)),
     },

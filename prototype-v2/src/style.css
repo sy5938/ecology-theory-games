@@ -451,6 +451,63 @@ input[type="range"]::-webkit-slider-thumb {
 [data-panel-id="strategy"][data-flash="true"] { box-shadow: 0 0 0 3px #d39b4f, 0 18px 45px #17352835; }
 
 .allocation-tools { display: flex; align-items: center; gap: 10px; }
+.opportunity-area { min-width: 0; flex: 1; }
+.opportunity-draft-panel > div:first-child,
+.cycle-opportunity-draft > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.opportunity-draft-panel > div:first-child small { color: var(--muted); font-size: calc(8px * var(--font-scale)); }
+.opportunity-draft {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 5px;
+}
+.opportunity-draft button {
+  min-width: 0;
+  border: 1px solid #d7c590;
+  border-radius: 10px;
+  background: #fff8e6;
+  color: #574724;
+  padding: 7px 8px;
+  text-align: left;
+}
+.opportunity-draft button:hover { border-color: #9b7d3e; transform: translateY(-1px); }
+.opportunity-draft button.active { border-color: #315c49; background: #e8f1df; box-shadow: inset 0 0 0 1px #315c49; color: #294b3b; }
+.opportunity-draft button span,
+.opportunity-draft button strong,
+.opportunity-draft button small,
+.opportunity-draft button em { display: block; overflow: hidden; text-overflow: ellipsis; }
+.opportunity-draft button span { color: #8b7142; font-size: calc(7px * var(--font-scale)); font-weight: 800; white-space: nowrap; }
+.opportunity-draft button strong { margin-top: 2px; font-size: calc(10px * var(--font-scale)); white-space: nowrap; }
+.opportunity-draft button small { margin-top: 4px; color: #56695f; font-size: calc(8px * var(--font-scale)); line-height: 1.35; }
+.opportunity-draft button em { margin-top: 3px; color: #936147; font-size: calc(7px * var(--font-scale)); font-style: normal; line-height: 1.3; }
+.opportunity-draft .opportunity-pass { border-style: dashed; background: #f4f4ee; color: #59665f; }
+.opportunity-slot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border: 1px solid #d4bd8d;
+  border-radius: 10px;
+  background: #fff6df;
+}
+.opportunity-slot > div { min-width: 0; flex: 1; }
+.opportunity-slot span,
+.opportunity-slot strong,
+.opportunity-slot small { display: block; }
+.opportunity-slot span { color: #8b7142; font-size: calc(7px * var(--font-scale)); font-weight: 800; }
+.opportunity-slot strong { color: #574724; font-size: calc(10px * var(--font-scale)); }
+.opportunity-slot small { overflow: hidden; color: #6e765f; font-size: calc(8px * var(--font-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.opportunity-slot button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: #7b5e26;
+  color: #fff;
+  padding: 7px 9px;
+  font-size: calc(8px * var(--font-scale));
+  font-weight: 850;
+}
+.opportunity-slot button:disabled { background: #c9c1ae; cursor: not-allowed; }
 .active-abilities { display: flex; flex-wrap: wrap; gap: 5px; }
 .active-abilities button {
   display: flex;
@@ -626,7 +683,7 @@ input[type="range"]::-webkit-slider-thumb {
 .report-card .report-columns li { display: flex; gap: 9px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 11px; line-height: 1.35; }
 .report-card .report-columns time { flex: 0 0 42px; color: #829087; font-variant-numeric: tabular-nums; }
 
-.cycle-review-card { width: min(820px, 94vw); }
+.cycle-review-card { width: min(900px, 94vw); max-height: 92vh; overflow-y: auto; }
 .cycle-review-card header { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .cycle-review-card header p { margin: 0; }
 .cycle-review-verdict { margin-top: 13px; padding: 11px 13px; border-radius: 11px; background: #edf1e9; }
@@ -647,6 +704,8 @@ input[type="range"]::-webkit-slider-thumb {
 .cycle-review-events { margin: 10px 0 16px; padding: 11px 13px; border-left: 3px solid #c7864f; background: #fff7e9; }
 .cycle-review-events span { color: #80633f; font-size: calc(9px * var(--font-scale)); font-weight: 850; }
 .cycle-review-events p { margin: 3px 0 0; color: #5e5140; font-size: calc(10px * var(--font-scale)); }
+.cycle-opportunity-draft { margin: 12px 0 16px; padding: 12px; border: 1px solid #dbc996; border-radius: 12px; background: #fffaf0; }
+.cycle-opportunity-draft > div:first-child strong { font-size: calc(11px * var(--font-scale)); }
 .cycle-next-choice > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .cycle-next-choice > div:first-child strong { font-size: calc(12px * var(--font-scale)); }
 .cycle-choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
@@ -659,6 +718,7 @@ input[type="range"]::-webkit-slider-thumb {
   text-align: left;
 }
 .cycle-choice-grid button:hover { border-color: #527461; background: #eef4e9; transform: translateY(-1px); }
+.cycle-choice-grid button:disabled { border-color: #d6dbd4; background: #eeeeea; color: #88928d; cursor: not-allowed; transform: none; }
 .cycle-choice-grid strong,
 .cycle-choice-grid span,
 .cycle-choice-grid small { display: block; }
@@ -1171,6 +1231,9 @@ input[type="range"]::-webkit-slider-thumb {
 .workspace-strategy .allocation-panel { min-height: 100%; border: 0; border-radius: 0; box-shadow: none; }
 .workspace-strategy .allocation-dock { display: block; padding: 13px; }
 .workspace-strategy .allocation-tools { align-items: stretch; flex-direction: column; }
+.workspace-strategy .opportunity-draft-panel > div:first-child small { display: none; }
+.workspace-strategy .opportunity-draft button { padding: 5px 6px; }
+.workspace-strategy .opportunity-draft button em { display: none; }
 .workspace-strategy .active-abilities, .workspace-strategy .allocation-presets { flex-wrap: wrap; }
 .workspace-strategy .carbon-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
@@ -1541,6 +1604,13 @@ input[type="range"]::-webkit-slider-thumb {
     margin: 0;
   }
   .workspace-strategy .allocation-tools { display: grid; gap: 5px; }
+  .workspace-strategy .opportunity-draft {
+    grid-template-columns: repeat(4, minmax(112px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+  .workspace-strategy .opportunity-draft button { padding: 4px 7px; }
   .workspace-strategy .active-abilities,
   .workspace-strategy .allocation-presets {
     flex-wrap: nowrap;
@@ -1600,4 +1670,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 @media (max-width: 560px) {
   .allocation-grid { grid-template-columns: 1fr; }
+  .opportunity-draft { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .opportunity-slot { align-items: stretch; flex-direction: column; }
+  .opportunity-slot button { width: 100%; }
 }

@@ -15,6 +15,7 @@ export type AllocationKey = 'growth' | 'reproduction' | 'reserve'
 export type ScenarioId = 'closed' | 'sparse' | 'colonization'
 export type ViewLayer = 'all' | 'canopy' | 'understory'
 export type ActiveAbility = 'defense' | 'mast' | 'disperse' | 'nursery'
+export type OpportunityCardId = ActiveAbility | 'gap' | 'recovery'
 export type StrategyPredictionKey = 'recruitment' | 'canopy' | 'resilience'
 export type DeathCause =
   | 'light'
@@ -131,6 +132,84 @@ export interface AbilityStatus {
   activeYears: number
 }
 
+export interface OpportunityCardDefinition {
+  id: OpportunityCardId
+  title: string
+  family: '招募' | '扩散' | '防御' | '林窗' | '恢复'
+  cost: number
+  effect: string
+  tradeoff: string
+}
+
+export const OPPORTUNITY_CARDS: Record<OpportunityCardId, OpportunityCardDefinition> = {
+  defense: {
+    id: 'defense',
+    title: '诱导防御',
+    family: '防御',
+    cost: 18,
+    effect: '本周期内降低病原菌与虫食伤害。',
+    tradeoff: '高储备成本，若没有虫害压力可能浪费。',
+  },
+  mast: {
+    id: 'mast',
+    title: '丰年脉冲',
+    family: '招募',
+    cost: 15,
+    effect: '把储备转成一次集中种子脉冲。',
+    tradeoff: '需要成熟个体，并提高后续聚集风险。',
+  },
+  disperse: {
+    id: 'disperse',
+    title: '鸟兽访果',
+    family: '扩散',
+    cost: 12,
+    effect: '本周期内提高远距种子比例。',
+    tradeoff: '传播更远，但不保证落点能够建立。',
+  },
+  nursery: {
+    id: 'nursery',
+    title: '暖湿建立窗',
+    family: '招募',
+    cost: 15,
+    effect: '本周期内提高建立率并降低幼苗损伤。',
+    tradeoff: '投入保护幼苗，不能直接强化现有成树。',
+  },
+  gap: {
+    id: 'gap',
+    title: '林窗先声',
+    family: '林窗',
+    cost: 10,
+    effect: '本周期新触发的幼树释放期从 3 年延长到 5 年。',
+    tradeoff: '若没有真实光照跃升，这张牌不会产生收益。',
+  },
+  recovery: {
+    id: 'recovery',
+    title: '风后修复',
+    family: '恢复',
+    cost: 10,
+    effect: '本周期结构损伤恢复速度提高 70%。',
+    tradeoff: '若没有结构损伤，投入不会转成额外增长。',
+  },
+}
+
+export interface OpportunityDraftRecord {
+  cycle: number
+  drawnAt: number
+  choices: OpportunityCardId[]
+  selected: OpportunityCardId | null
+  passed: boolean
+  used: boolean
+  usedAt: number | null
+  expired: boolean
+  outcome: string
+}
+
+export interface OpportunityCardStatus {
+  available: boolean
+  cost: number
+  reason: string
+}
+
 export interface SpeciesState {
   species: Species
   allocation: Allocation
@@ -146,6 +225,8 @@ export interface SpeciesState {
   disperseCooldownUntil: number
   nurseryUntil: number
   nurseryCooldownUntil: number
+  gapBoostUntil: number
+  recoveryBoostUntil: number
   cumulativeCarbonSequestered: number
   carbonAtLastHistory: number
   insectOutbreakUntil: number
@@ -203,6 +284,7 @@ export interface StrategyCycleReview {
   allocation: Allocation
   prediction: StrategyPrediction
   predictionMet: boolean
+  opportunity: OpportunityDraftRecord | null
   evidence: string[]
   before: StrategyCycleMetrics
   after: StrategyCycleMetrics
@@ -470,6 +552,7 @@ export class ForestSimulation {
   readonly deaths: DeathRecord[] = []
   readonly individualSnapshots: IndividualSnapshot[] = []
   readonly strategyReviews: StrategyCycleReview[] = []
+  readonly opportunityHistory: OpportunityDraftRecord[] = []
   readonly seed: number
   readonly densityPer400m2: number
   readonly initialCommunitySize: number
@@ -489,8 +572,13 @@ export class ForestSimulation {
   initialCanopyCover = 0
   strategyLockedUntil = 0
   strategyReview: StrategyCycleReview | null = null
+  selectedOpportunityCard: OpportunityCardId | null = null
+  opportunityPassed = false
+  opportunityUsed = false
 
   private readonly random: SeededRandom
+  private readonly opportunityRandom: SeededRandom
+  private currentOpportunityIndex = -1
   private nextId = 1
   private accumulator = 0
   private nextHistoryYear = 1
@@ -513,6 +601,7 @@ export class ForestSimulation {
     plannedUntil: number
     allocation: Allocation
     prediction: StrategyPrediction
+    opportunityIndex: number
     metrics: StrategyCycleMetrics
     eventIndex: number
   } | null = null
@@ -530,6 +619,7 @@ export class ForestSimulation {
         : { scenarioId: optionsOrScenario, seed: suppliedSeed }
     this.scenarioId = options.scenarioId ?? 'closed'
     this.seed = options.seed ?? suppliedSeed
+    this.opportunityRandom = new SeededRandom(this.seed ^ 0x5f3759df)
     this.densityPer400m2 = Math.round(Math.max(
       MIN_DENSITY_PER_400_M2,
       Math.min(MAX_DENSITY_PER_400_M2, options.densityPer400m2 ?? SCENARIOS[this.scenarioId].defaultDensity),
@@ -555,6 +645,8 @@ export class ForestSimulation {
         disperseCooldownUntil: 0,
         nurseryUntil: 0,
         nurseryCooldownUntil: 0,
+        gapBoostUntil: 0,
+        recoveryBoostUntil: 0,
         cumulativeCarbonSequestered: 0,
         carbonAtLastHistory: 0,
         insectOutbreakUntil: 0,
@@ -575,6 +667,7 @@ export class ForestSimulation {
     )
     this.recordAllIndividuals()
     this.sampleHistory(0)
+    this.drawOpportunityCards()
   }
 
   get playerSpecies(): Species {
@@ -623,6 +716,160 @@ export class ForestSimulation {
 
   get releasedPlayerCount(): number {
     return this.releasedPlayerIds.size
+  }
+
+  get opportunityChoices(): OpportunityCardId[] {
+    return [...(this.opportunityHistory[this.currentOpportunityIndex]?.choices ?? [])]
+  }
+
+  get opportunityDraftResolved(): boolean {
+    return this.selectedOpportunityCard !== null || this.opportunityPassed
+  }
+
+  get hasActiveStrategyCycle(): boolean {
+    return this.strategyCycleBaseline !== null
+  }
+
+  get currentOpportunityRecord(): OpportunityDraftRecord | null {
+    const record = this.opportunityHistory[this.currentOpportunityIndex]
+    return record
+      ? { ...record, choices: [...record.choices] }
+      : null
+  }
+
+  selectOpportunityCard(cardId: OpportunityCardId): AbilityResult {
+    if (this.strategyCycleBaseline) return { ok: false, message: '策略周期已经开始，不能更换本周期机缘。' }
+    const record = this.opportunityHistory[this.currentOpportunityIndex]
+    if (!record?.choices.includes(cardId)) return { ok: false, message: '这张牌不在本周期的机缘候选中。' }
+    this.selectedOpportunityCard = cardId
+    this.opportunityPassed = false
+    this.opportunityUsed = false
+    record.selected = cardId
+    record.passed = false
+    record.expired = false
+    return { ok: true, message: `已保留“${OPPORTUNITY_CARDS[cardId].title}”，承诺策略后可在本周期使用。` }
+  }
+
+  passOpportunityCards(): AbilityResult {
+    if (this.strategyCycleBaseline) return { ok: false, message: '策略周期已经开始，不能更换本周期机缘。' }
+    const record = this.opportunityHistory[this.currentOpportunityIndex]
+    if (!record) return { ok: false, message: '当前没有可处理的机缘牌。' }
+    this.selectedOpportunityCard = null
+    this.opportunityPassed = true
+    this.opportunityUsed = false
+    record.selected = null
+    record.passed = true
+    record.expired = false
+    record.outcome = '本周期主动放弃机缘，不消耗碳储备。'
+    return { ok: true, message: '本周期主动放弃机缘，不消耗碳储备。' }
+  }
+
+  opportunityCardStatus(): OpportunityCardStatus {
+    const cardId = this.selectedOpportunityCard
+    if (!cardId) return { available: false, cost: 0, reason: this.opportunityPassed ? '本周期已放弃机缘。' : '尚未选择机缘牌。' }
+    const definition = OPPORTUNITY_CARDS[cardId]
+    if (!this.strategyCycleBaseline) return { available: false, cost: definition.cost, reason: '承诺五年策略后才能使用。' }
+    if (this.opportunityUsed) return { available: false, cost: definition.cost, reason: '本周期机缘已经使用。' }
+    if (this.population(this.playerCode).length === 0) {
+      return { available: false, cost: definition.cost, reason: '玩家物种已经灭绝。' }
+    }
+    if (cardId === 'gap' || cardId === 'recovery') {
+      return {
+        available: this.playerState.reserve >= definition.cost,
+        cost: definition.cost,
+        reason: this.playerState.reserve >= definition.cost ? '条件满足，可以使用。' : `需要 ${definition.cost} 碳储备。`,
+      }
+    }
+    const status = this.abilityStatus(cardId)
+    const reason = status.available
+      ? '条件满足，可以使用。'
+      : status.cooldownYears > 0
+        ? `生态响应仍需冷却 ${status.cooldownYears.toFixed(1)} 年。`
+        : cardId === 'mast' && !this.population(this.playerCode).some((individual) => individual.stage === 'adult')
+          ? '需要至少一个成熟个体。'
+          : `需要 ${definition.cost} 碳储备。`
+    return { available: status.available, cost: definition.cost, reason }
+  }
+
+  activateOpportunityCard(): AbilityResult {
+    const cardId = this.selectedOpportunityCard
+    if (!cardId) return { ok: false, message: '本周期没有保留机缘牌。' }
+    const status = this.opportunityCardStatus()
+    if (!status.available) return { ok: false, message: status.reason }
+    const state = this.states.get(this.playerCode)!
+    let result: AbilityResult
+    if (cardId === 'gap') {
+      state.reserve -= OPPORTUNITY_CARDS.gap.cost
+      state.gapBoostUntil = this.strategyLockedUntil
+      result = { ok: true, message: '林窗先声启动：本周期新出现的幼树释放期将延长到 5 年。' }
+      this.addEvent(result.message, 'good', 'ability')
+    } else if (cardId === 'recovery') {
+      state.reserve -= OPPORTUNITY_CARDS.recovery.cost
+      state.recoveryBoostUntil = this.strategyLockedUntil
+      result = { ok: true, message: '风后修复启动：本周期结构损伤恢复速度提高 70%。' }
+      this.addEvent(result.message, 'good', 'ability')
+    } else {
+      result = this.activateAbility(cardId, this.strategyLockedUntil)
+    }
+    if (!result.ok) return result
+    this.opportunityUsed = true
+    const record = this.opportunityHistory[this.currentOpportunityIndex]
+    if (record) {
+      record.used = true
+      record.usedAt = this.forestYear
+      record.outcome = result.message
+    }
+    return result
+  }
+
+  private drawOpportunityCards(): void {
+    const abilities: OpportunityCardId[] = ['defense', 'mast', 'disperse', 'nursery', 'gap', 'recovery']
+    const candidates = abilities.filter((cardId) => {
+      if (cardId === 'mast' && !this.population(this.playerCode).some((individual) => individual.stage === 'adult')) return false
+      if (cardId === 'gap' || cardId === 'recovery') return true
+      return this.abilityStatus(cardId).cooldownYears <= 0
+    })
+    const choices: OpportunityCardId[] = []
+    while (candidates.length > 0 && choices.length < 3) {
+      const index = Math.floor(this.opportunityRandom.next() * candidates.length)
+      choices.push(candidates.splice(index, 1)[0])
+    }
+    const record: OpportunityDraftRecord = {
+      cycle: this.strategyCycleIndex + 1,
+      drawnAt: this.forestYear,
+      choices,
+      selected: null,
+      passed: false,
+      used: false,
+      usedAt: null,
+      expired: false,
+      outcome: '',
+    }
+    this.opportunityHistory.push(record)
+    this.currentOpportunityIndex = this.opportunityHistory.length - 1
+    this.selectedOpportunityCard = null
+    this.opportunityPassed = false
+    this.opportunityUsed = false
+  }
+
+  private passOpportunityAfterEarlyReplan(): number {
+    const record: OpportunityDraftRecord = {
+      cycle: this.strategyCycleIndex + 1,
+      drawnAt: this.forestYear,
+      choices: [],
+      selected: null,
+      passed: true,
+      used: false,
+      usedAt: null,
+      expired: false,
+      outcome: '风险预警触发提前改策，本紧急周期自动放弃机缘。',
+    }
+    this.opportunityHistory.push(record)
+    this.currentOpportunityIndex = this.opportunityHistory.length - 1
+    this.selectedOpportunityCard = null
+    this.opportunityPassed = true
+    this.opportunityUsed = false
+    return this.currentOpportunityIndex
   }
 
   setAllocation(allocation: Allocation): void {
@@ -675,6 +922,10 @@ export class ForestSimulation {
     if (!normalized) return { ok: false, message: '策略比例必须大于零。', cost: 0 }
     const status = this.strategyCommitStatus()
     if (!status.available) return { ok: false, message: status.reason, cost: 0 }
+    if (!this.opportunityDraftResolved) {
+      return { ok: false, message: '请先从三张生态机缘牌中保留一张，或明确放弃。', cost: 0 }
+    }
+    let opportunityIndex = this.currentOpportunityIndex
     let interruptedReview: StrategyCycleReview | null = null
     if (status.early && this.strategyCycleBaseline) {
       interruptedReview = this.completeStrategyCycle(true)
@@ -688,6 +939,7 @@ export class ForestSimulation {
         )
       }
       this.states.get(this.playerCode)!.reserve -= status.cost
+      opportunityIndex = this.passOpportunityAfterEarlyReplan()
     }
     this.states.get(this.playerCode)!.allocation = normalized
     this.strategyCycleIndex += 1
@@ -698,6 +950,7 @@ export class ForestSimulation {
       plannedUntil: this.strategyLockedUntil,
       allocation: { ...normalized },
       prediction: this.strategyPrediction(predictionKey),
+      opportunityIndex,
       metrics: this.strategyCycleMetrics(),
       eventIndex: this.events.length,
     }
@@ -817,13 +1070,27 @@ export class ForestSimulation {
         : predictionMet
           ? `主因判断：${Math.round(baseline.allocation.reproduction * 100)}% 繁殖投入和建立条件使幼体净增 ${changes.juveniles}。`
           : `主因判断：新增约 ${inferredBirths} 个但死亡 ${playerDeaths} 个，幼体净增 ${changes.juveniles}，未达到 +5 阈值。`
+    const opportunitySource = this.opportunityHistory[baseline.opportunityIndex]
+    if (opportunitySource?.selected && !opportunitySource.used) {
+      opportunitySource.expired = true
+      opportunitySource.outcome = `“${OPPORTUNITY_CARDS[opportunitySource.selected].title}”未使用，随周期过期。`
+    }
+    const opportunity = opportunitySource
+      ? { ...opportunitySource, choices: [...opportunitySource.choices] }
+      : null
+    const opportunityEvidence = opportunity?.selected
+      ? opportunity.used
+        ? `机缘账：使用“${OPPORTUNITY_CARDS[opportunity.selected].title}”；${opportunity.outcome}`
+        : `机缘账：保留“${OPPORTUNITY_CARDS[opportunity.selected].title}”但未使用，本周期没有获得牌面收益。`
+      : `机缘账：${opportunity?.outcome || '本周期主动放弃机缘，不消耗储备，也没有牌面收益。'}`
     const evidence = [
       mainCause,
       `人口账：新增约 ${inferredBirths} 个，死亡 ${playerDeaths} 个，净变化 ${changes.population >= 0 ? '+' : ''}${changes.population}。`,
       changes.releases > 0
-        ? `林窗账：${changes.releases} 株玩家幼树获得至少 20% 的光照跃升，进入 3 年释放期。`
+        ? `林窗账：${changes.releases} 株玩家幼树获得至少 20% 的光照跃升，进入释放期。`
         : '林窗账：本周期没有玩家幼树达到 20% 光照跃升，尚未形成可利用的释放机会。',
       `风险账：储备 ${changes.reserve >= 0 ? '+' : ''}${changes.reserve.toFixed(1)}，平均健康 ${changes.averageHealth >= 0 ? '+' : ''}${Math.round(changes.averageHealth * 100)} 个百分点。`,
+      opportunityEvidence,
     ]
     const review: StrategyCycleReview = {
       cycle: baseline.cycle,
@@ -834,6 +1101,7 @@ export class ForestSimulation {
       allocation: { ...baseline.allocation },
       prediction: { ...baseline.prediction },
       predictionMet,
+      opportunity,
       evidence,
       before: baseline.metrics,
       after,
@@ -851,6 +1119,7 @@ export class ForestSimulation {
     if (!review) return
     this.strategyReviews.push(review)
     this.strategyReview = review
+    this.drawOpportunityCards()
     this.paused = true
     this.addEvent(
       `第 ${review.cycle} 个五年策略周期结束：种群 ${review.changes.population >= 0 ? '+' : ''}${review.changes.population}，幼体 ${review.changes.juveniles >= 0 ? '+' : ''}${review.changes.juveniles}，储备 ${review.changes.reserve >= 0 ? '+' : ''}${review.changes.reserve.toFixed(1)}。`,
@@ -987,7 +1256,7 @@ export class ForestSimulation {
     }
   }
 
-  activateAbility(ability: ActiveAbility): AbilityResult {
+  activateAbility(ability: ActiveAbility, activeUntil = Number.POSITIVE_INFINITY): AbilityResult {
     const state = this.states.get(this.playerCode)!
     const status = this.abilityStatus(ability)
     if (!status.available) {
@@ -997,25 +1266,25 @@ export class ForestSimulation {
     }
     if (ability === 'defense') {
       state.reserve -= 18
-      state.defenseUntil = this.forestYear + 5
+      state.defenseUntil = Math.min(this.forestYear + 5, activeUntil)
       state.defenseCooldownUntil = this.forestYear + 10
-      const message = '诱导防御启动：未来 5 年病原菌和虫害伤害减半。'
+      const message = `诱导防御启动：未来 ${(state.defenseUntil - this.forestYear).toFixed(1)} 年病原菌和虫害伤害减半。`
       this.addEvent(message, 'good', 'ability')
       return { ok: true, message }
     }
     if (ability === 'disperse') {
       state.reserve -= 12
-      state.disperseUntil = this.forestYear + 3
+      state.disperseUntil = Math.min(this.forestYear + 3, activeUntil)
       state.disperseCooldownUntil = this.forestYear + 8
-      const message = '远距播散启动：未来 3 年长距离种子比例提高。'
+      const message = `远距播散启动：未来 ${(state.disperseUntil - this.forestYear).toFixed(1)} 年长距离种子比例提高。`
       this.addEvent(message, 'good', 'ability')
       return { ok: true, message }
     }
     if (ability === 'nursery') {
       state.reserve -= 15
-      state.nurseryUntil = this.forestYear + 3
+      state.nurseryUntil = Math.min(this.forestYear + 3, activeUntil)
       state.nurseryCooldownUntil = this.forestYear + 8
-      const message = '幼苗保育启动：未来 3 年建立率提高、幼苗损伤降低。'
+      const message = `幼苗保育启动：未来 ${(state.nurseryUntil - this.forestYear).toFixed(1)} 年建立率提高、幼苗损伤降低。`
       this.addEvent(message, 'good', 'ability')
       return { ok: true, message }
     }
@@ -1382,9 +1651,10 @@ export class ForestSimulation {
     }
     for (const individual of active) {
       const recoveryInvestment = 0.45 + state.allocation.growth * 0.8 + state.allocation.reserve * 0.35
+      const opportunityRecovery = state.recoveryBoostUntil > this.forestYear ? 1.7 : 1
       individual.structuralDamage = Math.max(
         0,
-        individual.structuralDamage - state.species.profile.recovery * recoveryInvestment * 0.004,
+        individual.structuralDamage - state.species.profile.recovery * recoveryInvestment * opportunityRecovery * 0.004,
       )
     }
     const adultInsectPressure = this.average(
@@ -1500,7 +1770,8 @@ export class ForestSimulation {
       if (individual.ageYears > 95 && this.random.next() < 0.008) this.damage(individual, 2, 'senescence')
       if (individual.stage === 'adult' && this.random.next() < 0.00025) this.damage(individual, 2, 'senescence')
       if (individual.stage === 'sapling' && light - individual.previousLight >= 0.2) {
-        individual.releaseUntil = this.forestYear + 3
+        const gapYears = this.states.get(individual.species.code)!.gapBoostUntil > this.forestYear ? 5 : 3
+        individual.releaseUntil = this.forestYear + gapYears
         if (individual.species.code === this.playerCode) this.releasedPlayerIds.add(individual.id)
       }
       individual.previousLight = light
@@ -2089,6 +2360,7 @@ export class ForestSimulation {
         `最终周期预测“${latestReview.prediction.target}”：${latestReview.predictionMet ? '命中' : '落空'}。`,
         latestReview.evidence[0],
         latestReview.evidence[1],
+        latestReview.evidence.at(-1) ?? '',
       )
     }
     const missionDetails = mission

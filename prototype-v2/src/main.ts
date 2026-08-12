@@ -7,15 +7,16 @@ import { gameLayout, setupLayout, type SetupStep } from './layouts'
 import { SPECIES, STRATEGIES, type Strategy } from './species'
 import {
   CANOPY_HEIGHT_METERS,
+  OPPORTUNITY_CARDS,
   RISK_THRESHOLD,
   SCENARIOS,
   ForestSimulation,
-  type ActiveAbility,
   type Allocation,
   type AllocationKey,
   type Individual,
   type IndividualSnapshot,
   type OutcomeReport,
+  type OpportunityCardId,
   type ScenarioId,
   type StrategyCycleReview,
   type StrategyPredictionKey,
@@ -84,8 +85,8 @@ const TUTORIAL_STEPS = [
   { target: 'layers', title: '按需控制地图图层', body: '左侧可筛选高度层、生活史阶段与物种。风险和新近死亡默认关闭，放大到个体尺度后再按需开启。' },
   { target: 'inspect', title: '点击检查个体或空地', body: '查询卡会显示在点击位置旁。展开详情可查看树高、胸径、光照与竞争；点击地图外或按 Esc 关闭。' },
   { target: 'statistics', title: '用图表观察此消彼长', body: '右上统计窗口可切换物种、功能型、出生死亡、固碳与多样性图表；“放大查看”可提供更完整的图表空间。' },
-  { target: 'allocation', title: '先预测，再分配有限的碳', body: '先选择一条五年后可验证的预测，再在生长、繁殖和储备之间取舍。承诺后常态下五年内不能免费改变。' },
-  { target: 'start', title: '承诺第一个五年周期', body: '确认预测与策略后时间才推进。每五年会强制暂停、验算预测并给出人口、林窗和风险证据；预警期可付费提前改策。' },
+  { target: 'allocation', title: '先选机缘，再做五年预测', body: '每周期从三张生态机缘中保留一张，也可以放弃；再选择可验证预测，并在生长、繁殖和储备之间取舍。' },
+  { target: 'start', title: '承诺第一个五年周期', body: '确认机缘、预测与策略后时间才推进。机缘一周期最多使用一次，未使用会过期；五年后复盘会单独记录是否使用与周期结果。' },
 ] as const
 
 const appRoot = document.querySelector<HTMLDivElement>('#app')!
@@ -443,12 +444,21 @@ function bindGameControls(): void {
     window.setTimeout(() => document.querySelector<HTMLElement>('[data-panel-id="strategy"]')?.removeAttribute('data-flash'), 900)
     updateUi()
   })
-  document.querySelectorAll<HTMLButtonElement>('[data-ability]').forEach((button) => {
-    button.addEventListener('click', () => {
-      if (!simulation) return
-      simulation.activateAbility(button.dataset.ability as ActiveAbility)
+  document.querySelectorAll<HTMLElement>('[data-opportunity-draft-root]').forEach((root) => {
+    root.addEventListener('click', (event) => {
+      if (!simulation || !(event.target instanceof Element)) return
+      const cardButton = event.target.closest<HTMLButtonElement>('[data-opportunity-card]')
+      const passButton = event.target.closest<HTMLButtonElement>('[data-opportunity-pass]')
+      if (cardButton) simulation.selectOpportunityCard(cardButton.dataset.opportunityCard as OpportunityCardId)
+      else if (passButton) simulation.passOpportunityCards()
+      else return
       updateUi()
     })
+  })
+  document.querySelector<HTMLButtonElement>('#play-opportunity-card')!.addEventListener('click', () => {
+    if (!simulation) return
+    simulation.activateOpportunityCard()
+    updateUi()
   })
   document.querySelector<HTMLSelectElement>('#chart-mode-select')?.addEventListener('change', (event) => {
     chartMode = (event.currentTarget as HTMLSelectElement).value as ChartMode
@@ -686,6 +696,10 @@ function allocationForecast(allocation: Allocation): string {
 
 function commitPendingStrategy(startAfterCommit: boolean): void {
   if (!simulation) return
+  if (!simulation.opportunityDraftResolved) {
+    setText('strategy-commit-reason', '先从三张生态机缘中保留一张，或明确放弃。')
+    return
+  }
   if (!selectedPrediction) {
     setText('strategy-commit-reason', '先选择一条五年后可以验证的预测。')
     return
@@ -783,9 +797,9 @@ function updateUi(): void {
   setText('mission-progress-label', mission.progressLabel)
   const missionBar = document.querySelector<HTMLElement>('#mission-progress-bar')
   if (missionBar) missionBar.style.width = `${Math.round(mission.progress * 100)}%`
-  setText('pause-button', !gameStarted ? '确认预测与策略并开始' : simulation.paused && !simulation.report ? '继续' : '暂停')
+  setText('pause-button', !gameStarted ? '确认机缘、预测与策略并开始' : simulation.paused && !simulation.report ? '继续' : '暂停')
   const pauseButton = document.querySelector<HTMLButtonElement>('#pause-button')
-  if (pauseButton) pauseButton.disabled = !gameStarted && !selectedPrediction
+  if (pauseButton) pauseButton.disabled = !gameStarted && (!selectedPrediction || !simulation.opportunityDraftResolved)
   const contract = document.querySelector<HTMLElement>('#strategy-contract')
   if (contract) contract.dataset.early = String(commitStatus.early)
   const completedCycles = simulation.strategyReviews.filter((review) => !review.endedEarly).length
@@ -810,13 +824,16 @@ function updateUi(): void {
   })
   setText(
     'strategy-commit-reason',
-    commitStatus.available && !selectedPrediction
-      ? '先选择一条五年后可以验证的预测。'
+    commitStatus.available && !simulation.opportunityDraftResolved
+      ? '先从三张生态机缘中保留一张，或明确放弃。'
+      : commitStatus.available && !selectedPrediction
+        ? '先选择一条五年后可以验证的预测。'
       : `${commitStatus.reason} ${allocationForecast(pendingAllocation())}`,
   )
   const commitButton = document.querySelector<HTMLButtonElement>('#commit-strategy')
   if (commitButton) {
-    commitButton.disabled = !commitStatus.available || !selectedPrediction || Boolean(simulation.report)
+    commitButton.disabled = !commitStatus.available || !selectedPrediction ||
+      !simulation.opportunityDraftResolved || Boolean(simulation.report)
     commitButton.textContent = !gameStarted
       ? '承诺并开始'
       : commitStatus.early
@@ -833,7 +850,7 @@ function updateUi(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-allocation-preset]').forEach((button) => {
     button.disabled = observationOnly || !commitStatus.available || Boolean(simulation!.report)
   })
-  updateAbilityButtons()
+  updateOpportunityCards()
   updateStatisticsPanel()
   updateEventPanel()
   updateSelectedPanel()
@@ -848,20 +865,47 @@ function updateUi(): void {
   ) showStrategyReview(simulation.strategyReview)
 }
 
-function updateAbilityButtons(): void {
+function updateOpportunityCards(): void {
   if (!simulation) return
-  for (const ability of ['defense', 'mast', 'disperse', 'nursery'] as ActiveAbility[]) {
-    const status = simulation.abilityStatus(ability)
-    const button = document.querySelector<HTMLButtonElement>(`[data-ability="${ability}"]`)
-    if (!button) continue
-    button.disabled = !status.available
-    const label = status.activeYears > 0
-      ? `生效 ${status.activeYears.toFixed(1)} 年`
-      : status.cooldownYears > 0
-        ? `冷却 ${status.cooldownYears.toFixed(1)} 年`
-        : `${status.cost} 储备`
-    setText(`${ability}-status`, label)
+  const draftPhase = !simulation.hasActiveStrategyCycle && !simulation.report
+  document.querySelectorAll<HTMLElement>('[data-opportunity-draft-container]').forEach((container) => {
+    container.classList.toggle('hidden', !draftPhase)
+  })
+  const choices = simulation.opportunityChoices
+  document.querySelectorAll<HTMLElement>('[data-opportunity-draft-root]').forEach((root) => {
+    root.innerHTML = [
+      ...choices.map((cardId) => {
+        const card = OPPORTUNITY_CARDS[cardId]
+        const selected = simulation!.selectedOpportunityCard === cardId
+        return `<button type="button" data-opportunity-card="${cardId}" class="${selected ? 'active' : ''}" aria-pressed="${selected}" title="${card.effect} ${card.tradeoff}"><span>${card.family} · ${card.cost} 储备</span><strong>${card.title}</strong><small>${card.effect}</small><em>${card.tradeoff}</em></button>`
+      }),
+      `<button type="button" data-opportunity-pass class="opportunity-pass ${simulation!.opportunityPassed ? 'active' : ''}" aria-pressed="${simulation!.opportunityPassed}"><span>零成本</span><strong>放弃机缘</strong><small>保留全部储备</small><em>本周期没有一次性生态响应</em></button>`,
+    ].join('')
+  })
+  const slot = document.querySelector<HTMLElement>('#opportunity-slot')
+  slot?.classList.toggle('hidden', !simulation.hasActiveStrategyCycle)
+  if (simulation.hasActiveStrategyCycle) {
+    const cardId = simulation.selectedOpportunityCard
+    const card = cardId ? OPPORTUNITY_CARDS[cardId] : null
+    const status = simulation.opportunityCardStatus()
+    setText('opportunity-slot-title', card?.title ?? '本周期放弃机缘')
+    setText(
+      'opportunity-slot-effect',
+      card
+        ? `${card.effect} ${status.reason}`
+        : '没有牌面收益，也不消耗碳储备。',
+    )
+    const playButton = document.querySelector<HTMLButtonElement>('#play-opportunity-card')
+    if (playButton) {
+      playButton.hidden = !card
+      playButton.disabled = !status.available
+      playButton.textContent = simulation.opportunityUsed ? '本周期已使用' : `支付 ${status.cost} 储备使用`
+    }
   }
+  document.querySelectorAll<HTMLButtonElement>('[data-cycle-preset]').forEach((button) => {
+    button.disabled = !simulation!.opportunityDraftResolved
+    button.title = button.disabled ? '先选择或放弃下一周期机缘' : ''
+  })
 }
 
 function updateStageBar(population: Individual[]): void {

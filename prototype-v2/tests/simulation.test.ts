@@ -4,6 +4,7 @@ import { createExportArchive } from '../src/export-data'
 import { competitionFromLoad, sigmoid } from '../src/pressure'
 import {
   ForestSimulation,
+  OPPORTUNITY_CARDS,
   SCENARIOS,
   gapReleaseMultiplier,
   selfThinningSizeMultiplier,
@@ -32,6 +33,12 @@ function advanceTo(simulation: ForestSimulation, targetYear: number): void {
     simulation.update(0.1)
     guard += 1
   }
+}
+
+function resolveOpportunity(simulation: ForestSimulation): void {
+  const card = simulation.opportunityChoices[0]
+  const result = card ? simulation.selectOpportunityCard(card) : simulation.passOpportunityCards()
+  expect(result.ok).toBe(true)
 }
 
 function earlyStageShare(individuals: Individual[]): number {
@@ -143,6 +150,7 @@ describe('V4 species profiles and scenario missions', () => {
 describe('five-year strategy game loop', () => {
   it('locks a committed strategy and charges reserve only for warning-driven early replanning', () => {
     const simulation = makeSimulation('closed', 10, 2026)
+    resolveOpportunity(simulation)
     const first = simulation.commitPlayerStrategy({ growth: 0.7, reproduction: 0.2, reserve: 0.1 })
     expect(first.ok).toBe(true)
     expect(simulation.strategyLockedUntil).toBeCloseTo(5, 8)
@@ -162,10 +170,12 @@ describe('five-year strategy game loop', () => {
     expect(early).toMatchObject({ ok: true, cost: 6 })
     expect(simulation.playerState.reserve).toBeCloseTo(reserveBefore - 6, 8)
     expect(simulation.strategyReviews.at(-1)?.endedEarly).toBe(true)
+    expect(simulation.currentOpportunityRecord).toMatchObject({ cycle: 2, choices: [], passed: true })
   })
 
   it('publishes a causal review after each completed five-year commitment', () => {
     const simulation = makeSimulation('sparse', 10, 7788)
+    resolveOpportunity(simulation)
     simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 }, 'resilience')
     advanceTo(simulation, 5.2)
     expect(simulation.strategyReview).toMatchObject({
@@ -177,10 +187,11 @@ describe('five-year strategy game loop', () => {
       predictionMet: expect.any(Boolean),
     })
     expect(simulation.strategyReview!.after.population).toBeGreaterThan(0)
-    expect(simulation.strategyReview!.evidence).toHaveLength(4)
+    expect(simulation.strategyReview!.evidence).toHaveLength(5)
     expect(simulation.strategyReview!.evidence.join(' ')).toContain('主因判断')
     expect(simulation.strategyReview!.evidence.join(' ')).toContain('人口账')
     expect(simulation.strategyReview!.evidence.join(' ')).toContain('林窗账')
+    expect(simulation.strategyReview!.evidence.join(' ')).toContain('机缘账')
     expect(simulation.strategyReviews).toHaveLength(1)
     expect(simulation.strategyCommitStatus().available).toBe(true)
   })
@@ -199,6 +210,7 @@ describe('five-year strategy game loop', () => {
     const simulation = new ForestSimulation(SPECIES, shade.code, {
       scenarioId: 'closed', densityPer400m2: 30, seed: 2026,
     })
+    resolveOpportunity(simulation)
     simulation.commitPlayerStrategy({ growth: 0.25, reproduction: 0.15, reserve: 0.6 }, 'resilience')
     advanceTo(simulation, 5)
     expect(simulation.playerState.reserve).toBeGreaterThan(28)
@@ -208,6 +220,7 @@ describe('five-year strategy game loop', () => {
 
   it('stops at the scenario target year with a scored mission result', () => {
     const simulation = makeSimulation('sparse', 10, 2026)
+    resolveOpportunity(simulation)
     simulation.commitPlayerStrategy({ growth: 0.7, reproduction: 0.2, reserve: 0.1 }, 'canopy')
     simulation.forestYear = SCENARIOS.sparse.targetYear - 0.04
     advanceOneStep(simulation)
@@ -219,6 +232,76 @@ describe('five-year strategy game loop', () => {
     })
     expect(simulation.report?.title).toContain('情景结算')
     expect(simulation.report?.strategyImpacts.join(' ')).toContain('最终周期预测')
+  })
+})
+
+describe('ecological opportunity cards', () => {
+  it('draws a deterministic three-card choice from a seed-isolated random stream', () => {
+    const first = makeSimulation('closed', 10, 4242)
+    const second = makeSimulation('closed', 10, 4242)
+    expect(first.opportunityChoices).toHaveLength(3)
+    expect(new Set(first.opportunityChoices).size).toBe(3)
+    expect(first.opportunityChoices).toEqual(second.opportunityChoices)
+  })
+
+  it('requires an explicit card choice or pass before strategy commitment', () => {
+    const simulation = makeSimulation('closed', 10, 2026)
+    const blocked = simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 })
+    expect(blocked).toMatchObject({ ok: false })
+    expect(blocked.message).toContain('生态机缘')
+
+    expect(simulation.passOpportunityCards()).toMatchObject({ ok: true })
+    expect(simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 })).toMatchObject({ ok: true })
+  })
+
+  it('spends reserve once when the held card is played and rejects a second use', () => {
+    const simulation = makeSimulation('closed', 10, 7788)
+    const cardId = simulation.opportunityChoices[0]
+    expect(simulation.selectOpportunityCard(cardId)).toMatchObject({ ok: true })
+    expect(simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 })).toMatchObject({ ok: true })
+    const reserveBefore = simulation.playerState.reserve
+    expect(simulation.activateOpportunityCard()).toMatchObject({ ok: true })
+    expect(simulation.playerState.reserve).toBeCloseTo(reserveBefore - OPPORTUNITY_CARDS[cardId].cost, 8)
+    expect(simulation.activateOpportunityCard()).toMatchObject({ ok: false })
+    expect(simulation.currentOpportunityRecord).toMatchObject({ selected: cardId, used: true, expired: false })
+  })
+
+  it.each(Object.keys(OPPORTUNITY_CARDS) as Array<keyof typeof OPPORTUNITY_CARDS>)(
+    'can draw and activate the %s mechanism card',
+    (cardId) => {
+      let simulation: ForestSimulation | null = null
+      for (let seed = 1; seed <= 60; seed += 1) {
+        const candidate = makeSimulation('closed', 10, seed)
+        if (candidate.opportunityChoices.includes(cardId)) {
+          simulation = candidate
+          break
+        }
+      }
+      expect(simulation, `${cardId} should appear within the deterministic seed sample`).not.toBeNull()
+      expect(simulation!.selectOpportunityCard(cardId)).toMatchObject({ ok: true })
+      expect(simulation!.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 })).toMatchObject({ ok: true })
+      const reserveBefore = simulation!.playerState.reserve
+      expect(simulation!.activateOpportunityCard()).toMatchObject({ ok: true })
+      expect(simulation!.playerState.reserve).toBeCloseTo(reserveBefore - OPPORTUNITY_CARDS[cardId].cost, 8)
+      if (cardId === 'gap') expect(simulation!.playerState.gapBoostUntil).toBeCloseTo(5, 8)
+      if (cardId === 'recovery') expect(simulation!.playerState.recoveryBoostUntil).toBeCloseTo(5, 8)
+    },
+  )
+
+  it('expires a selected but unused card and writes it into the five-year review', () => {
+    const simulation = makeSimulation('sparse', 10, 9911)
+    const cardId = simulation.opportunityChoices[0]
+    expect(simulation.selectOpportunityCard(cardId)).toMatchObject({ ok: true })
+    expect(simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 })).toMatchObject({ ok: true })
+    advanceTo(simulation, 5.2)
+
+    expect(simulation.strategyReview?.opportunity).toMatchObject({
+      selected: cardId,
+      used: false,
+      expired: true,
+    })
+    expect(simulation.strategyReview?.evidence.join(' ')).toContain('未使用')
+    expect(simulation.opportunityChoices).toHaveLength(3)
   })
 })
 
@@ -652,6 +735,7 @@ describe('forest-year checkpoint and export', () => {
       'functional_type_history.csv',
       'individual_snapshots.csv',
       'metadata.json',
+      'opportunity_history.csv',
       'report.json',
       'species_history.csv',
       'species_profiles.csv',
@@ -666,6 +750,7 @@ describe('forest-year checkpoint and export', () => {
     const functionalHistory = strFromU8(archive['functional_type_history.csv'])
     const speciesProfiles = strFromU8(archive['species_profiles.csv'])
     const strategyReviews = strFromU8(archive['strategy_reviews.csv'])
+    const opportunityHistory = strFromU8(archive['opportunity_history.csv'])
     expect(speciesHistory).toContain('births_per_100')
     expect(speciesHistory).toContain('annual_carbon_sequestered')
     expect(speciesHistory).toContain('cumulative_carbon_sequestered')
@@ -676,11 +761,14 @@ describe('forest-year checkpoint and export', () => {
     expect(speciesProfiles).toContain('light_compensation')
     expect(speciesProfiles).toContain('provenance')
     expect(strategyReviews).toContain('prediction_met')
+    expect(strategyReviews).toContain('opportunity_selected')
     expect(strategyReviews).toContain('causal_evidence')
+    expect(opportunityHistory).toContain('choices')
+    expect(opportunityHistory).toContain('expired')
 
     const metadata = JSON.parse(strFromU8(archive['metadata.json']))
     expect(metadata).toMatchObject({
-      schemaVersion: '4.3',
+      schemaVersion: '4.4',
       scenario: 'closed',
       initialDensityPer400m2: 10,
       initialCommunitySize: 250,
