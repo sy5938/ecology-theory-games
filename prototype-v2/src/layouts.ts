@@ -18,12 +18,12 @@ const header = (player: Species, scenarioId: ScenarioId) => `
         <button type="button" data-font-size="medium" title="中字号">中</button>
         <button type="button" data-font-size="large" title="大字号">大</button>
       </div>
-      <button class="quiet-button report-button" id="report-button" type="button">演替结算</button>
+      <button class="quiet-button report-button" id="report-button" type="button">阶段报告</button>
       <button class="quiet-button" id="export-button" type="button">导出数据</button>
       <button class="quiet-button" id="properties-button" type="button">属性表</button>
       <button class="quiet-button" id="edit-layout-button" type="button" aria-pressed="false">编辑布局</button>
       <button class="quiet-button" id="reset-layout-button" type="button">恢复布局</button>
-      <button class="quiet-button" id="restart-button" type="button">重开</button>
+      <button class="quiet-button" id="restart-button" type="button" title="返回开局设置；未导出的本局进度将丢失">返回开局</button>
     </div>
   </header>
 `
@@ -55,7 +55,7 @@ const mapPanel = `
           ${[250, 500, 750].map((position) => `<line x1="0" y1="${position}" x2="1000" y2="${position}"></line>`).join('')}
         </g>
         <g class="map-axis-lines" vector-effect="non-scaling-stroke">
-          <line id="map-scale-line" x1="2" y1="998" x2="998" y2="998"></line>
+          <line id="map-axis-baseline" x1="2" y1="998" x2="998" y2="998"></line>
           <line x1="2" y1="2" x2="2" y2="998"></line>
           ${[2, 250, 500, 750, 998].map((position) => `<line x1="${position}" y1="984" x2="${position}" y2="1000"></line>`).join('')}
           ${[2, 250, 500, 750, 998].map((position) => `<line x1="0" y1="${position}" x2="16" y2="${position}"></line>`).join('')}
@@ -141,8 +141,8 @@ const simulationControls = `
       <button type="button" data-speed="1" class="active">1×</button>
       <button type="button" data-speed="2">2×</button>
       <button type="button" data-speed="4">4×</button>
-      <button type="button" data-speed="8" data-long-term disabled title="第 100 年结算后解锁">8×</button>
-      <button type="button" data-speed="16" data-long-term disabled title="第 100 年结算后解锁">16×</button>
+      <button type="button" data-speed="8" data-long-term disabled title="完成情景结算后解锁">8×</button>
+      <button type="button" data-speed="16" data-long-term disabled title="完成情景结算后解锁">16×</button>
     </div>
     <span class="control-hint">先观察地图和个体状态，再开始时间</span>
   </section>
@@ -163,10 +163,10 @@ const missionPanel = `
 `
 
 const allocationPanel = `
-  <section class="allocation-panel allocation-dock surface" data-tutorial-target="allocation">
+  <section class="allocation-panel allocation-dock surface">
     <div class="panel-heading">
       <div><span class="label">你的生命史策略</span><strong id="allocation-impact">等待第一个生态时间步</strong></div>
-      <div class="allocation-tools">
+      <div class="allocation-tools" data-tutorial-target="allocation">
         <div class="opportunity-area" aria-label="生态机缘牌">
           <div class="opportunity-draft-panel" data-opportunity-draft-container>
             <div><span class="label">本周期生态机缘 · 抽三选一</span><small>可放弃；未使用会在周期末过期</small></div>
@@ -310,7 +310,7 @@ const overlays = `
     <div class="property-table-wrap" id="property-table-wrap"><table><thead><tr><th>个体</th><th>阶段</th><th>树高</th><th>胸径</th><th>健康</th><th>竞争</th><th>风险</th></tr></thead><tbody id="property-table-body"></tbody></table></div>
     <div class="property-pagination"><button id="property-page-prev" type="button">上一页</button><span id="property-page-status">第 1 / 1 页</span><button id="property-page-next" type="button">下一页</button></div>
   </aside>
-  <div id="report-modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div id="report-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="report-title">
     <div class="modal-card report-card">
       <header class="report-header"><div class="eyebrow" id="report-kicker">森林演替结算</div><h2 id="report-title">第 0 年森林演替结算</h2></header>
       <div class="report-scroll-body">
@@ -337,7 +337,7 @@ const overlays = `
     <div class="modal-card cycle-review-card">
       <header>
         <div class="eyebrow" id="cycle-review-kicker">五年策略复盘</div>
-        <h2 id="cycle-review-title">第一个周期结束</h2>
+        <h2 id="cycle-review-title" tabindex="-1">第一个周期结束</h2>
         <p id="cycle-review-summary"></p>
       </header>
       <section class="cycle-review-verdict" id="cycle-review-verdict"></section>
@@ -353,6 +353,7 @@ const overlays = `
       <section class="cycle-next-choice">
         <div><span class="label">下一周期只能选择一条主路线</span><strong>承诺后执行五年</strong></div>
         <div class="cycle-choice-grid">
+          <button type="button" id="cycle-repeat-strategy"><strong>沿用上周期配置</strong><span>保持原分配与预测</span><small>最快两步继续：先处理机缘，再沿用</small></button>
           <button type="button" data-cycle-preset="canopy"><strong>抢占林窗</strong><span>生长 70% · 预测新增林冠</span><small>代价：繁殖与储备薄弱</small></button>
           <button type="button" data-cycle-preset="pioneer"><strong>传播下一代</strong><span>繁殖 65% · 预测幼体净增</span><small>代价：现有个体增长慢</small></button>
           <button type="button" data-cycle-preset="shade"><strong>林下蓄势</strong><span>储备 60% · 预测守住缓冲</span><small>代价：短期扩张最慢</small></button>
@@ -362,10 +363,10 @@ const overlays = `
       </section>
     </div>
   </div>
-  <div id="tutorial-modal" class="tutorial-overlay hidden" role="dialog" aria-modal="false" aria-labelledby="tutorial-title">
+  <div id="tutorial-modal" class="tutorial-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
     <div class="tutorial-spotlight" id="tutorial-spotlight" aria-hidden="true"></div>
-    <div class="tutorial-card">
-      <div class="eyebrow" id="tutorial-step-label">新手教程 · 1 / 5</div>
+    <div class="tutorial-card" tabindex="-1">
+      <div class="eyebrow" id="tutorial-step-label">新手教程 · 1 / 3</div>
       <h2 id="tutorial-title">先认识你的森林</h2>
       <p id="tutorial-body"></p>
       <div class="tutorial-actions"><button id="tutorial-skip" type="button" class="quiet-button">跳过教程</button><button id="tutorial-next" type="button">下一步</button></div>
@@ -439,14 +440,14 @@ export function setupLayout(
 ): string {
   const strategyCards = (Object.keys(STRATEGIES) as Strategy[]).map((strategy) => {
     const entry = STRATEGIES[strategy]
-    return `<button type="button" class="strategy-card ${selectedStrategy === strategy ? 'selected' : ''}" data-strategy="${strategy}"><i style="--strategy:${entry.css}"></i><strong>${entry.name}</strong><span>${entry.description}</span></button>`
+    return `<button type="button" class="strategy-card ${selectedStrategy === strategy ? 'selected' : ''}" data-strategy="${strategy}" aria-pressed="${selectedStrategy === strategy}"><i style="--strategy:${entry.css}"></i><strong>${entry.name}</strong><span>${entry.description}</span></button>`
   }).join('')
   const speciesCards = SPECIES.filter((species) => species.strategy === selectedStrategy).map(
-    (species) => `<button type="button" class="species-card ${selectedCode === species.code ? 'selected' : ''}" data-species="${species.code}"><strong>${species.name}<small>${species.profile.archetype}</small></strong><em>${species.latin}</em><span>优势：${species.profile.playStrength}</span><span>代价：${species.profile.tradeoff}</span><span>最高约 ${species.maxHeight} m · 参数可信度 ${species.profile.confidence === 'medium' ? '中' : species.profile.confidence === 'high' ? '高' : '低'}</span></button>`,
+    (species) => `<button type="button" class="species-card ${selectedCode === species.code ? 'selected' : ''}" data-species="${species.code}" aria-pressed="${selectedCode === species.code}"><strong>${species.name}<small>${species.profile.archetype}</small></strong><em>${species.latin}</em><span>优势：${species.profile.playStrength}</span><span>代价：${species.profile.tradeoff}</span><span>最高约 ${species.maxHeight} m · 参数可信度 ${species.profile.confidence === 'medium' ? '中' : species.profile.confidence === 'high' ? '高' : '低'}</span></button>`,
   ).join('')
   const scenarioCards = (Object.keys(SCENARIOS) as ScenarioId[]).map((scenarioId) => {
     const scenario = SCENARIOS[scenarioId]
-    return `<button type="button" class="scenario-card ${selectedScenario === scenarioId ? 'selected' : ''}" data-scenario="${scenarioId}"><span>${scenario.coverHint}</span><strong>${scenario.name}</strong><p>${scenario.description}</p><small>默认 ${scenario.defaultDensity} 个/400 m² · ${scenario.lightHint}</small></button>`
+    return `<button type="button" class="scenario-card ${selectedScenario === scenarioId ? 'selected' : ''}" data-scenario="${scenarioId}" aria-pressed="${selectedScenario === scenarioId}"><span>${scenario.coverHint}</span><strong>${scenario.name}</strong><p>${scenario.description}</p><small>默认 ${scenario.defaultDensity} 个/400 m² · ${scenario.lightHint}</small></button>`
   }).join('')
   const player = SPECIES.find((species) => species.code === selectedCode) ?? SPECIES[0]
   const backgroundTotal = density * 25
@@ -480,10 +481,11 @@ export function setupLayout(
           <p>生长、繁殖与储备，每一份投入都意味着放弃另一种可能。</p>
           <p>从森林的尺度思考：向上争夺阳光，为后代豪赌，还是为未知保留力量？</p>
         </div>
-        <div class="setup-rules"><span>100 m × 100 m</span><span>空间完全随机</span><span>第 100 年复盘</span><span>可持续演替</span></div>
+        <div class="setup-rules"><span>100 m × 100 m</span><span>空间完全随机</span><span>第 ${SCENARIOS[selectedScenario].targetYear} 年情景结算</span><span>每 5 年策略复盘</span></div>
       </section>
       <section class="setup-form surface" id="setup-wizard" data-step="${step + 1}">
         <div class="wizard-progress" id="wizard-progress" aria-label="开局进度">${[0, 1, 2, 3, 4].map((index) => `<i class="${index <= step ? 'active' : ''}"></i>`).join('')}<span>${step + 1} / 5</span></div>
+        ${step === 0 ? '<button type="button" id="quick-start" class="quick-start-button">使用当前情景的推荐配置快速开始</button>' : ''}
         <div class="wizard-content">${stepContents[step]}</div>
         <div class="wizard-actions">
           <button type="button" id="wizard-back" class="quiet-button" ${step === 0 ? 'disabled' : ''}>上一步</button>
@@ -491,7 +493,7 @@ export function setupLayout(
             ? '<button type="button" id="wizard-next" class="primary-button">下一步</button>'
             : `<button type="button" id="start-game" class="primary-button">进入${SCENARIOS[selectedScenario].name}</button>`}
         </div>
-        <p class="setup-note">进入地图后由你主动开始时间；首次进入会显示五步玩法教程。</p>
+        <p class="setup-note">进入地图后由你主动开始时间；首次进入会显示三步任务式教程。</p>
       </section>
     </main>
   `

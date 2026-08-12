@@ -81,12 +81,9 @@ const MAP_STYLE_STORAGE_KEY = 'forest-map-style-v1'
 const PROPERTY_ROW_HEIGHT = 45
 const PROPERTY_OVERSCAN = 6
 const TUTORIAL_STEPS = [
-  { target: 'map', title: '浏览 100 × 100 m 森林', body: '滚轮按 GIS 层级缩放；按住鼠标右键拖动可平移地图，点击“复位”返回全图。白色五角星是你的个体。' },
-  { target: 'layers', title: '按需控制地图图层', body: '左侧可筛选高度层、生活史阶段与物种。风险和新近死亡默认关闭，放大到个体尺度后再按需开启。' },
-  { target: 'inspect', title: '点击检查个体或空地', body: '查询卡会显示在点击位置旁。展开详情可查看树高、胸径、光照与竞争；点击地图外或按 Esc 关闭。' },
-  { target: 'statistics', title: '用图表观察此消彼长', body: '右上统计窗口可切换物种、功能型、出生死亡、固碳与多样性图表；“放大查看”可提供更完整的图表空间。' },
-  { target: 'allocation', title: '先选机缘，再做五年预测', body: '每周期从三张生态机缘中保留一张，也可以放弃；再选择可验证预测，并在生长、繁殖和储备之间取舍。' },
-  { target: 'start', title: '承诺第一个五年周期', body: '确认机缘、预测与策略后时间才推进。机缘一周期最多使用一次，未使用会过期；五年后复盘会单独记录是否使用与周期结果。' },
+  { target: 'map', panel: 'map', title: '先读懂你的森林', body: '用地图上的“＋ / −”缩放；点一个个体或空地查看光照、竞争和风险。白色五角星是你的个体。' },
+  { target: 'allocation', panel: 'strategy', title: '做一次有代价的五年选择', body: '先从三张生态机缘中保留一张或放弃，再点一个快速策略；你仍可微调生长、繁殖、储备比例和五年预测。' },
+  { target: 'start', panel: 'map', title: '承诺后才让时间推进', body: '确认机缘、预测与策略后，主按钮才会开始演替。五年后会暂停复盘；第一次完整展示，之后用不遮住地图的侧栏快速决策。' },
 ] as const
 
 const appRoot = document.querySelector<HTMLDivElement>('#app')!
@@ -110,6 +107,7 @@ let uiInterval: number | null = null
 let resizeObserver: ResizeObserver | null = null
 let reportShownFor: object | null = null
 let manualReportWasPaused: boolean | null = null
+let reportReturnFocus: HTMLElement | null = null
 let lastPropertyTableYear = -1
 let gameStarted = false
 let propertyIndividuals: Individual[] = []
@@ -127,6 +125,9 @@ let chartTooltipRestoreFrame: number | null = null
 let suppressChartTooltip = false
 let shownStrategyReviewCycle = 0
 let selectedPrediction: StrategyPredictionKey | null = null
+let tutorialWasPaused: boolean | null = null
+let tutorialReturnFocus: HTMLElement | null = null
+let documentControlAbortController: AbortController | null = null
 
 applyFontSize(readFontSize())
 renderSetup()
@@ -175,6 +176,7 @@ function renderSetup(): void {
     renderSetup()
   })
   document.querySelector<HTMLButtonElement>('#start-game')?.addEventListener('click', () => startGame())
+  document.querySelector<HTMLButtonElement>('#quick-start')?.addEventListener('click', () => startGame())
   bindFontControls()
 }
 
@@ -221,6 +223,9 @@ function uiFontPx(base: number): number {
 }
 
 function startGame(seed?: number): void {
+  if (uiInterval !== null) window.clearInterval(uiInterval)
+  documentControlAbortController?.abort()
+  documentControlAbortController = null
   const player = SPECIES.find((species) => species.code === selectedCode)!
   statisticsScope = 'player'
   statisticsSpeciesCode = selectedCode
@@ -230,6 +235,10 @@ function startGame(seed?: number): void {
     seed,
   })
   appRoot.innerHTML = gameLayout(player, selectedScenario, simulation.activeSpecies)
+  window.scrollTo({ top: 0, left: 0 })
+  if (window.matchMedia('(max-width: 899px)').matches) {
+    document.querySelector<HTMLDetailsElement>('#layer-tree')?.removeAttribute('open')
+  }
   const speciesLayerTemplate = document.querySelector<HTMLTemplateElement>('#active-species-layer-template')
   const speciesLayerRows = document.querySelector<HTMLElement>('#species-layer-rows')
   if (speciesLayerTemplate && speciesLayerRows) speciesLayerRows.append(speciesLayerTemplate.content.cloneNode(true))
@@ -349,12 +358,16 @@ function updateMapScale(viewport: MapViewport): void {
 }
 
 function bindGameControls(): void {
+  documentControlAbortController?.abort()
+  documentControlAbortController = new AbortController()
+  const documentSignal = documentControlAbortController.signal
   document.querySelector<HTMLButtonElement>('#help-button')!.addEventListener('click', () => openTutorial(true))
   bindFontControls()
   document.querySelector<HTMLButtonElement>('#pause-button')!.addEventListener('click', () => {
     if (!simulation || simulation.report) return
-    if (!gameStarted) {
-      commitPendingStrategy(true)
+    const needsStrategyCommit = simulation.population(simulation.playerCode).length > 0 && !simulation.hasActiveStrategyCycle
+    if (!gameStarted || needsStrategyCommit) {
+      commitPendingStrategy(!gameStarted)
       return
     } else simulation.paused = !simulation.paused
     updateUi()
@@ -367,8 +380,8 @@ function bindGameControls(): void {
       button.classList.add('active')
     })
   })
-  document.querySelector<HTMLButtonElement>('#restart-button')!.addEventListener('click', restart)
-  document.querySelector<HTMLButtonElement>('#modal-restart-button')!.addEventListener('click', restart)
+  document.querySelector<HTMLButtonElement>('#restart-button')!.addEventListener('click', () => restart(true))
+  document.querySelector<HTMLButtonElement>('#modal-restart-button')!.addEventListener('click', () => restart(false))
   document.querySelector<HTMLButtonElement>('#retry-seed-button')!.addEventListener('click', retrySameSeed)
   document.querySelector<HTMLButtonElement>('#report-button')!.addEventListener('click', () => openManualReport())
   document.querySelector<HTMLButtonElement>('#export-button')!.addEventListener('click', exportRun)
@@ -434,15 +447,31 @@ function bindGameControls(): void {
       selectedPrediction = null
       document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.add('hidden')
       simulation.paused = false
+      syncAppInert()
       updateUi()
     })
+  })
+  document.querySelector<HTMLButtonElement>('#cycle-repeat-strategy')!.addEventListener('click', () => {
+    const review = simulation?.strategyReview
+    if (!simulation || !review || !simulation.opportunityDraftResolved) return
+    const result = simulation.commitPlayerStrategy(review.allocation, review.prediction.key)
+    if (!result.ok) return
+    selectedPrediction = null
+    document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.add('hidden')
+    simulation.paused = false
+    syncAllocationControls(simulation.allocation)
+    syncAppInert()
+    updateUi()
   })
   document.querySelector<HTMLButtonElement>('#cycle-custom-strategy')!.addEventListener('click', () => {
     selectedPrediction = null
     document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.add('hidden')
+    window.ForestWorkspace?.initialize()?.show('strategy')
     document.querySelector<HTMLElement>('[data-panel-id="strategy"]')?.setAttribute('data-flash', 'true')
     window.setTimeout(() => document.querySelector<HTMLElement>('[data-panel-id="strategy"]')?.removeAttribute('data-flash'), 900)
+    syncAppInert()
     updateUi()
+    window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-prediction]:not(:disabled)')?.focus())
   })
   document.querySelectorAll<HTMLElement>('[data-opportunity-draft-root]').forEach((root) => {
     root.addEventListener('click', (event) => {
@@ -515,16 +544,37 @@ function bindGameControls(): void {
   document.querySelector<HTMLButtonElement>('#tutorial-next')!.addEventListener('click', advanceTutorial)
   document.querySelector<HTMLButtonElement>('#tutorial-skip')!.addEventListener('click', closeTutorial)
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Tab' && trapOverlayFocus(event)) return
     if (event.key !== 'Escape') return
+    if (!document.querySelector('#tutorial-modal.hidden')) {
+      event.preventDefault()
+      closeTutorial()
+      return
+    }
+    const reportModal = document.querySelector<HTMLElement>('#report-modal')
+    if (reportModal && !reportModal.classList.contains('hidden')) {
+      const continueButton = document.querySelector<HTMLButtonElement>('#continue-button')
+      if (continueButton && !continueButton.hidden) {
+        event.preventDefault()
+        continueButton.click()
+      }
+      return
+    }
+    const cycleModal = document.querySelector<HTMLElement>('#cycle-review-modal')
+    if (cycleModal && !cycleModal.classList.contains('hidden')) {
+      event.preventDefault()
+      document.querySelector<HTMLButtonElement>('#cycle-custom-strategy')?.click()
+      return
+    }
     clearPinnedChartTooltip(true)
     document.querySelector<HTMLDetailsElement>('#chart-mode-menu')?.removeAttribute('open')
     if (selection) closeMapQuery()
-  })
+  }, { signal: documentSignal })
   document.addEventListener('pointerdown', (event) => {
     if (!selection || !(event.target instanceof Element)) return
     if (event.target.closest('#map-query-popover, #game-root, #property-drawer, .modal')) return
     closeMapQuery()
-  })
+  }, { signal: documentSignal })
 }
 
 function syncChartModePicker(): void {
@@ -714,6 +764,7 @@ function commitPendingStrategy(startAfterCommit: boolean): void {
   if (gameStarted) simulation.paused = false
   selectedPrediction = null
   document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.add('hidden')
+  syncAppInert()
   syncAllocationControls(simulation.allocation)
   updateUi()
 }
@@ -797,9 +848,22 @@ function updateUi(): void {
   setText('mission-progress-label', mission.progressLabel)
   const missionBar = document.querySelector<HTMLElement>('#mission-progress-bar')
   if (missionBar) missionBar.style.width = `${Math.round(mission.progress * 100)}%`
-  setText('pause-button', !gameStarted ? '确认机缘、预测与策略并开始' : simulation.paused && !simulation.report ? '继续' : '暂停')
+  const needsStrategyCommit = gameStarted && population.length > 0 && !simulation.hasActiveStrategyCycle
+  setText(
+    'pause-button',
+    !gameStarted
+      ? '确认机缘、预测与策略并开始'
+      : needsStrategyCommit
+        ? '确认机缘、预测与策略并继续'
+        : simulation.paused && !simulation.report
+          ? '继续'
+          : '暂停',
+  )
   const pauseButton = document.querySelector<HTMLButtonElement>('#pause-button')
-  if (pauseButton) pauseButton.disabled = !gameStarted && (!selectedPrediction || !simulation.opportunityDraftResolved)
+  if (pauseButton) {
+    pauseButton.disabled = (!gameStarted || needsStrategyCommit) &&
+      (!selectedPrediction || !simulation.opportunityDraftResolved)
+  }
   const contract = document.querySelector<HTMLElement>('#strategy-contract')
   if (contract) contract.dataset.early = String(commitStatus.early)
   const completedCycles = simulation.strategyReviews.filter((review) => !review.endedEarly).length
@@ -842,7 +906,7 @@ function updateUi(): void {
   }
   document.querySelectorAll<HTMLButtonElement>('[data-long-term]').forEach((button) => {
     button.disabled = !simulation!.longTermUnlocked
-    button.title = simulation!.longTermUnlocked ? '' : '第 100 年结算后解锁'
+    button.title = simulation!.longTermUnlocked ? '' : '完成情景结算后解锁'
   })
   document.querySelectorAll<HTMLInputElement>('[data-allocation]').forEach((input) => {
     input.disabled = observationOnly || !commitStatus.available || Boolean(simulation!.report)
@@ -867,12 +931,24 @@ function updateUi(): void {
 
 function updateOpportunityCards(): void {
   if (!simulation) return
-  const draftPhase = !simulation.hasActiveStrategyCycle && !simulation.report
+  const draftPhase = simulation.population(simulation.playerCode).length > 0 &&
+    !simulation.hasActiveStrategyCycle && !simulation.report
+  const cycleModalVisible = !document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.contains('hidden')
   document.querySelectorAll<HTMLElement>('[data-opportunity-draft-container]').forEach((container) => {
-    container.classList.toggle('hidden', !draftPhase)
+    const inCycleModal = Boolean(container.closest('#cycle-review-modal'))
+    const active = draftPhase && (cycleModalVisible ? inCycleModal : !inCycleModal)
+    container.classList.toggle('hidden', !active)
+    container.toggleAttribute('inert', !active)
   })
   const choices = simulation.opportunityChoices
   document.querySelectorAll<HTMLElement>('[data-opportunity-draft-root]').forEach((root) => {
+    const signature = JSON.stringify({
+      choices,
+      selected: simulation!.selectedOpportunityCard,
+      passed: simulation!.opportunityPassed,
+    })
+    if (root.dataset.renderSignature === signature) return
+    root.dataset.renderSignature = signature
     root.innerHTML = [
       ...choices.map((cardId) => {
         const card = OPPORTUNITY_CARDS[cardId]
@@ -906,6 +982,11 @@ function updateOpportunityCards(): void {
     button.disabled = !simulation!.opportunityDraftResolved
     button.title = button.disabled ? '先选择或放弃下一周期机缘' : ''
   })
+  const repeatButton = document.querySelector<HTMLButtonElement>('#cycle-repeat-strategy')
+  if (repeatButton) {
+    repeatButton.disabled = !simulation.opportunityDraftResolved
+    repeatButton.title = repeatButton.disabled ? '先选择或放弃下一周期机缘' : ''
+  }
 }
 
 function updateStageBar(population: Individual[]): void {
@@ -1432,6 +1513,7 @@ function updateChart(force = false): void {
 
 function openManualReport(): void {
   if (!simulation) return
+  reportReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   manualReportWasPaused = simulation.paused
   simulation.paused = true
   showReport(simulation.createOutcomeReport(), true)
@@ -1439,6 +1521,7 @@ function openManualReport(): void {
 
 function showStrategyReview(review: StrategyCycleReview): void {
   if (!simulation) return
+  const firstPresentedReview = shownStrategyReviewCycle === 0
   shownStrategyReviewCycle = review.cycle
   simulation.paused = true
   const dominant = review.allocation.growth >= Math.max(review.allocation.reproduction, review.allocation.reserve)
@@ -1479,13 +1562,31 @@ function showStrategyReview(review: StrategyCycleReview): void {
         : '转折：没有突发事件，变化主要来自资源承诺、光照与邻域竞争。',
     ].join(' '),
   )
-  document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.remove('hidden')
+  const modal = document.querySelector<HTMLElement>('#cycle-review-modal')
+  if (modal) {
+    const presentation = firstPresentedReview ? 'full' : 'drawer'
+    modal.dataset.presentation = presentation
+    modal.setAttribute('aria-modal', String(presentation === 'full'))
+    modal.classList.remove('hidden')
+  }
+  syncAppInert()
   updateUi()
+  window.requestAnimationFrame(() => {
+    const card = document.querySelector<HTMLElement>('#cycle-review-modal .cycle-review-card')
+    const title = document.querySelector<HTMLElement>('#cycle-review-title')
+    title?.focus({ preventScroll: true })
+    if (card) card.scrollTop = 0
+  })
 }
 
 function showReport(report: OutcomeReport, manual: boolean): void {
   if (!simulation) return
+  if (!reportReturnFocus) reportReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   reportShownFor = report
+  if (!manual && report.kind === 'mission' && simulation.strategyReview) {
+    shownStrategyReviewCycle = Math.max(shownStrategyReviewCycle, simulation.strategyReview.cycle)
+  }
+  document.querySelector<HTMLElement>('#cycle-review-modal')?.classList.add('hidden')
   setText(
     'report-kicker',
     manual
@@ -1520,6 +1621,13 @@ function showReport(report: OutcomeReport, manual: boolean): void {
   const retryButton = document.querySelector<HTMLButtonElement>('#retry-seed-button')!
   retryButton.hidden = manual || report.kind === 'checkpoint'
   document.querySelector<HTMLElement>('#report-modal')!.classList.remove('hidden')
+  syncAppInert()
+  window.requestAnimationFrame(() => {
+    const focusTarget = !continueButton.hidden
+      ? continueButton
+      : document.querySelector<HTMLButtonElement>('#retry-seed-button:not([hidden]), #report-export-button, #modal-restart-button')
+    focusTarget?.focus()
+  })
   reportChart?.dispose()
   reportChart = echarts.init(document.querySelector<HTMLDivElement>('#report-chart')!, undefined, { renderer: 'canvas' })
   reportChart.setOption({
@@ -1548,7 +1656,14 @@ function closeReport(): void {
   reportChart?.dispose()
   reportChart = null
   document.querySelector('#report-modal')?.classList.add('hidden')
+  syncAppInert()
+  if (!simulation.hasActiveStrategyCycle && simulation.population(simulation.playerCode).length > 0) {
+    window.ForestWorkspace?.initialize()?.show('strategy')
+  }
   updateUi()
+  const returnFocus = reportReturnFocus
+  reportReturnFocus = null
+  if (returnFocus?.isConnected) returnFocus.focus()
 }
 
 function exportRun(): void {
@@ -1716,9 +1831,20 @@ function showHoverTooltip(individual: Individual | null, screenX = 0, screenY = 
 
 function openTutorial(force = false): void {
   if (!force && localStorage.getItem(TUTORIAL_STORAGE_KEY) === 'true') return
+  if (simulation?.report || simulation?.strategyReview) return
+  if (document.querySelector('#report-modal:not(.hidden), #cycle-review-modal:not(.hidden)')) return
+  tutorialReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  tutorialWasPaused = simulation?.paused ?? true
+  if (simulation) {
+    simulation.paused = true
+    updateUi()
+  }
   tutorialStep = 0
+  document.documentElement.toggleAttribute('data-tutorial-open', true)
   document.querySelector<HTMLElement>('#tutorial-modal')?.classList.remove('hidden')
+  syncAppInert()
   renderTutorialStep()
+  window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('#tutorial-next')?.focus())
 }
 
 function advanceTutorial(): void {
@@ -1732,6 +1858,7 @@ function advanceTutorial(): void {
 
 function renderTutorialStep(): void {
   const step = TUTORIAL_STEPS[tutorialStep]
+  window.ForestWorkspace?.initialize()?.show(step.panel)
   document.querySelectorAll('.tutorial-focus').forEach((element) => element.classList.remove('tutorial-focus'))
   const target = document.querySelector<HTMLElement>(`[data-tutorial-target="${step.target}"]`)
   target?.classList.add('tutorial-focus')
@@ -1786,8 +1913,61 @@ function positionTutorial(target: HTMLElement | null): void {
 
 function closeTutorial(): void {
   localStorage.setItem(TUTORIAL_STORAGE_KEY, 'true')
+  document.documentElement.removeAttribute('data-tutorial-open')
   document.querySelector<HTMLElement>('#tutorial-modal')?.classList.add('hidden')
   document.querySelectorAll('.tutorial-focus').forEach((element) => element.classList.remove('tutorial-focus'))
+  const observationMode = simulation && simulation.population(simulation.playerCode).length === 0
+  if (
+    simulation &&
+    tutorialWasPaused === false &&
+    (simulation.hasActiveStrategyCycle || observationMode) &&
+    !simulation.report &&
+    document.querySelector('#cycle-review-modal.hidden')
+  ) simulation.paused = false
+  tutorialWasPaused = null
+  syncAppInert()
+  const returnFocus = tutorialReturnFocus
+  tutorialReturnFocus = null
+  if (returnFocus?.isConnected) returnFocus.focus()
+}
+
+function activeBlockingOverlay(): HTMLElement | null {
+  const tutorial = document.querySelector<HTMLElement>('#tutorial-modal:not(.hidden)')
+  if (tutorial) return tutorial
+  const report = document.querySelector<HTMLElement>('#report-modal:not(.hidden)')
+  if (report) return report
+  return document.querySelector<HTMLElement>('#cycle-review-modal:not(.hidden)[data-presentation="full"]')
+}
+
+function syncAppInert(): void {
+  document.querySelector<HTMLElement>('.app-shell')?.toggleAttribute('inert', Boolean(activeBlockingOverlay()))
+}
+
+function trapOverlayFocus(event: KeyboardEvent): boolean {
+  const overlay = activeBlockingOverlay()
+  if (!overlay) return false
+  const focusable = Array.from(overlay.querySelectorAll<HTMLElement>(
+    'button:not(:disabled):not([hidden]), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  )).filter((element) => element.getClientRects().length > 0)
+  if (focusable.length === 0) return false
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+    return true
+  }
+  if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+    return true
+  }
+  if (!overlay.contains(document.activeElement)) {
+    event.preventDefault()
+    first.focus()
+    return true
+  }
+  return false
 }
 
 function statusGrid(entries: Array<[string, string]>): string {
@@ -1814,7 +1994,8 @@ function setText(id: string, value: string | number): void {
   if (element) element.textContent = String(value)
 }
 
-function restart(): void {
+function restart(confirmProgressLoss: boolean): void {
+  if (confirmProgressLoss && simulation && !window.confirm('返回开局设置？未导出的本局进度将丢失。')) return
   if (uiInterval !== null) window.clearInterval(uiInterval)
   window.location.reload()
 }
@@ -1837,5 +2018,6 @@ function retrySameSeed(): void {
   forestScene = null
   reportShownFor = null
   manualReportWasPaused = null
+  reportReturnFocus = null
   startGame(seed)
 }

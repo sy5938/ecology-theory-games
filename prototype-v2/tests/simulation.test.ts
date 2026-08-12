@@ -221,6 +221,36 @@ describe('five-year strategy game loop', () => {
     expect(simulation.strategyCommitStatus().available).toBe(true)
   })
 
+  it('folds the final cycle review into the mission report before asking for a sandbox strategy', () => {
+    const simulation = makeSimulation('colonization', 10, 7788)
+    resolveOpportunity(simulation)
+    expect(simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 }, 'resilience').ok).toBe(true)
+
+    for (let cycle = 1; cycle < 4; cycle += 1) {
+      advanceTo(simulation, cycle * 5 + 0.2)
+      expect(simulation.report).toBeNull()
+      expect(simulation.strategyReview?.cycle).toBe(cycle)
+      resolveOpportunity(simulation)
+      expect(simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 }, 'resilience').ok).toBe(true)
+      simulation.paused = false
+    }
+
+    advanceTo(simulation, SCENARIOS.colonization.targetYear + 0.2)
+    expect(simulation.report).toMatchObject({ kind: 'mission', canContinue: true })
+    expect(simulation.strategyReviews.at(-1)?.cycle).toBe(4)
+    expect(simulation.strategyReview).toBeNull()
+    expect(simulation.currentOpportunityRecord?.cycle).toBe(4)
+    for (const evidence of simulation.strategyReviews.at(-1)!.evidence) {
+      expect(simulation.report!.strategyImpacts).toContain(evidence)
+    }
+
+    simulation.continueAfterReport()
+    expect(simulation.report).toBeNull()
+    expect(simulation.paused).toBe(true)
+    expect(simulation.hasActiveStrategyCycle).toBe(false)
+    expect(simulation.currentOpportunityRecord?.cycle).toBe(5)
+  })
+
   it('labels carried-seed establishment as an independent period flow instead of a causal funnel', () => {
     const pioneer = SPECIES.find((species) => species.code === 'SASTZU')!
     const simulation = new ForestSimulation(SPECIES, pioneer.code, {
@@ -590,6 +620,8 @@ describe('maturity and outcome rules', () => {
 
   it('pauses on player extinction and resumes in observation mode', () => {
     const simulation = makeSimulation('closed', 10)
+    resolveOpportunity(simulation)
+    expect(simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 }, 'resilience').ok).toBe(true)
     for (const individual of simulation.population(playerCode)) {
       individual.health = 0
       individual.deathCause = 'competition'
@@ -598,6 +630,9 @@ describe('maturity and outcome rules', () => {
 
     expect(simulation.report).toMatchObject({ kind: 'player-extinct', terminal: false, canContinue: true })
     expect(simulation.paused).toBe(true)
+    expect(simulation.hasActiveStrategyCycle).toBe(false)
+    expect(simulation.strategyReview).toBeNull()
+    expect(simulation.strategyReviews.at(-1)).toMatchObject({ endedEarly: true })
     simulation.continueAfterReport()
     expect(simulation.report).toBeNull()
     expect(simulation.paused).toBe(false)
@@ -605,6 +640,7 @@ describe('maturity and outcome rules', () => {
     advanceOneStep(simulation)
     expect(simulation.forestYear).toBeGreaterThan(year)
     expect(simulation.population(playerCode)).toHaveLength(0)
+    expect(simulation.strategyReview).toBeNull()
   })
 
   it('keeps total community extinction terminal', () => {

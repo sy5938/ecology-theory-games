@@ -1126,18 +1126,24 @@ export class ForestSimulation {
 
   private updateStrategyCycle(): void {
     if (!this.strategyCycleBaseline || this.strategyReview) return
+    if (this.population(this.playerCode).length === 0) return
     if (this.forestYear + 1e-6 < this.strategyLockedUntil) return
     const review = this.completeStrategyCycle(false)
     if (!review) return
     this.strategyReviews.push(review)
-    this.strategyReview = review
-    this.drawOpportunityCards()
-    this.paused = true
+    const reportImminent =
+      (!this.missionCheckpointShown && this.forestYear + FIXED_STEP_YEARS + 1e-6 >= SCENARIOS[this.scenarioId].targetYear) ||
+      (!this.firstCheckpointShown && this.forestYear + FIXED_STEP_YEARS + 1e-6 >= FIRST_CHECKPOINT_YEAR)
+    this.strategyReview = reportImminent ? null : review
+    if (!reportImminent) {
+      this.drawOpportunityCards()
+      this.paused = true
+    }
     this.addEvent(
       `第 ${review.cycle} 个五年策略周期结束：种群 ${review.changes.population >= 0 ? '+' : ''}${review.changes.population}，幼体 ${review.changes.juveniles >= 0 ? '+' : ''}${review.changes.juveniles}，储备 ${review.changes.reserve >= 0 ? '+' : ''}${review.changes.reserve.toFixed(1)}。`,
       review.changes.population < 0 ? 'warning' : 'good',
       'strategy',
-      'emergency',
+      reportImminent ? 'routine' : 'emergency',
     )
   }
 
@@ -1316,14 +1322,23 @@ export class ForestSimulation {
   continueAfterReport(): void {
     if (this.report?.kind === 'community-extinct') return
     this.report = null
-    this.paused = false
     if (this.population(this.playerCode).length === 0) {
+      this.paused = false
       this.longTermUnlocked = true
       this.addEvent('玩家物种已经灭绝，继续以观察模式观看其余群落演替。', 'neutral', 'process')
-    } else if (!this.longTermUnlocked) {
+      return
+    }
+    if (!this.longTermUnlocked) {
       this.longTermUnlocked = true
       this.addEvent('进入长期演替期：已解锁 8× 与 16×，后续结算由玩家主动查看。', 'good', 'process')
     }
+    if (!this.strategyCycleBaseline && this.strategyReviews.length > 0) {
+      const pendingCycle = this.strategyCycleIndex + 1
+      const currentDraft = this.opportunityHistory[this.currentOpportunityIndex]
+      if (currentDraft?.cycle !== pendingCycle) this.drawOpportunityCards()
+      this.paused = true
+      this.addEvent('情景结算已完成：先处理新机缘并承诺下一周期，再继续长期演替。', 'neutral', 'strategy')
+    } else this.paused = false
   }
 
   stageLabel(stage: Stage): string {
@@ -1571,6 +1586,9 @@ export class ForestSimulation {
     }
     if (this.population(this.playerCode).length === 0 && !this.playerExtinctionShown) {
       this.playerExtinctionShown = true
+      const finalReview = this.completeStrategyCycle(true)
+      if (finalReview) this.strategyReviews.push(finalReview)
+      this.strategyReview = null
       this.addEvent('玩家物种已经灭绝，可以继续观察其余群落演替。', 'bad', 'process', 'emergency')
       this.paused = true
       this.report = this.buildOutcomeReport('player-extinct')
@@ -2425,9 +2443,7 @@ export class ForestSimulation {
     if (mission && latestReview && Math.abs(latestReview.endedAt - this.forestYear) < 0.2) {
       strategyImpacts.push(
         `最终周期预测“${latestReview.prediction.target}”：${latestReview.predictionMet ? '命中' : '落空'}。`,
-        latestReview.evidence[0],
-        latestReview.evidence[1],
-        latestReview.evidence.at(-1) ?? '',
+        ...latestReview.evidence,
       )
     }
     const missionDetails = mission

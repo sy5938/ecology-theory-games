@@ -31,6 +31,7 @@ interface SavedLayout {
 export interface WorkspaceLayoutApi {
   reset: () => void
   open: (panelId: PanelId) => void
+  show: (panelId: PanelId) => void
   close: (panelId: PanelId) => void
   togglePanelMaximize: (panelId: PanelId) => boolean
   togglePanelVertical: (panelId: PanelId) => boolean
@@ -58,6 +59,7 @@ class WorkspaceController implements WorkspaceLayoutApi {
   private topZ = 4
   private resizeFrame: number | null = null
   private editing = false
+  private readonly lifecycle = new AbortController()
 
   constructor(root: HTMLElement) {
     this.root = root
@@ -93,6 +95,20 @@ class WorkspaceController implements WorkspaceLayoutApi {
     }
     this.applyAll()
     this.persist()
+  }
+
+  show = (panelId: PanelId): void => {
+    const state = this.states.get(panelId)
+    if (!state) return
+    if (this.mobileQuery.matches) this.mobilePanel = panelId === 'map' ? null : panelId
+    else {
+      state.closed = false
+      state.minimized = false
+      state.z = ++this.topZ
+    }
+    this.applyAll()
+    this.persist()
+    this.notifyResize(panelId)
   }
 
   close = (panelId: PanelId): void => {
@@ -154,39 +170,41 @@ class WorkspaceController implements WorkspaceLayoutApi {
   }
 
   destroy(): void {
+    this.lifecycle.abort()
     if (this.resizeFrame !== null) window.cancelAnimationFrame(this.resizeFrame)
   }
 
   private bind(): void {
+    const signal = this.lifecycle.signal
     this.root.addEventListener('pointerdown', (event) => {
       const panel = (event.target as Element).closest<HTMLElement>('[data-workspace-panel]')
       if (panel) this.bringToFront(panel.dataset.panelId as PanelId)
-    })
+    }, { signal })
     for (const [id, panel] of this.panels) {
-      panel.querySelector<HTMLElement>('[data-window-drag]')?.addEventListener('pointerdown', (event) => this.beginDrag(event, id))
+      panel.querySelector<HTMLElement>('[data-window-drag]')?.addEventListener('pointerdown', (event) => this.beginDrag(event, id), { signal })
       panel.querySelector<HTMLElement>('[data-window-drag]')?.addEventListener('dblclick', (event) => {
         if (!this.editing || (event.target as Element).closest('button')) return
         this.toggleMaximize(id)
-      })
-      panel.querySelector<HTMLElement>('[data-window-resize]')?.addEventListener('pointerdown', (event) => this.beginResize(event, id))
+      }, { signal })
+      panel.querySelector<HTMLElement>('[data-window-resize]')?.addEventListener('pointerdown', (event) => this.beginResize(event, id), { signal })
       panel.querySelectorAll<HTMLButtonElement>('[data-window-action]').forEach((button) => {
-        button.addEventListener('click', () => this.runAction(id, button.dataset.windowAction ?? ''))
+        button.addEventListener('click', () => this.runAction(id, button.dataset.windowAction ?? ''), { signal })
       })
     }
     document.querySelectorAll<HTMLButtonElement>('[data-workspace-open]').forEach((button) => {
-      button.addEventListener('click', () => this.open(button.dataset.workspaceOpen as PanelId))
+      button.addEventListener('click', () => this.open(button.dataset.workspaceOpen as PanelId), { signal })
     })
-    document.querySelector<HTMLButtonElement>('#reset-layout-button')?.addEventListener('click', this.reset)
+    document.querySelector<HTMLButtonElement>('#reset-layout-button')?.addEventListener('click', this.reset, { signal })
     document.querySelector<HTMLButtonElement>('#edit-layout-button')?.addEventListener('click', () => {
       this.editing = !this.editing
       if (!this.editing) this.persist()
       this.applyAll()
-    })
+    }, { signal })
     this.mobileQuery.addEventListener('change', () => {
       this.mobilePanel = null
       this.applyAll()
       this.notifyResize()
-    })
+    }, { signal })
     window.addEventListener('resize', () => {
       if (this.resizeFrame !== null) return
       this.resizeFrame = window.requestAnimationFrame(() => {
@@ -194,7 +212,7 @@ class WorkspaceController implements WorkspaceLayoutApi {
         if (!this.mobileQuery.matches) this.constrainAll()
         this.applyAll()
       })
-    })
+    }, { signal })
   }
 
   private createDefaultStates(): void {

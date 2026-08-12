@@ -38,7 +38,7 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .42; }
 
-button:focus-visible, input:focus-visible {
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
   outline: 3px solid #d89b4d88;
   outline-offset: 2px;
 }
@@ -646,7 +646,7 @@ input[type="range"]::-webkit-slider-thumb {
 .modal-card p { color: var(--muted); font-size: 13px; line-height: 1.55; }
 .modal-card ul { margin: 16px 0 20px; padding: 0; list-style: none; }
 .modal-card li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
-.modal-actions { display: flex; gap: 8px; }
+.modal-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .modal-actions button, .primary-button {
   border: 0;
   border-radius: 11px;
@@ -726,6 +726,22 @@ input[type="range"]::-webkit-slider-thumb {
 .cycle-choice-grid span { margin-top: 5px; color: #3f6251; font-size: calc(10px * var(--font-scale)); font-weight: 750; }
 .cycle-choice-grid small { margin-top: 3px; color: #8a654d; font-size: calc(9px * var(--font-scale)); }
 .cycle-next-choice > .quiet-button { width: 100%; margin-top: 9px; border: 1px solid var(--line); border-radius: 9px; background: #edf0e8; padding: 8px; color: var(--ink); font-weight: 800; }
+
+#cycle-review-modal[data-presentation="drawer"] {
+  place-items: stretch end;
+  padding: 12px;
+  background: #13271f20;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+#cycle-review-modal[data-presentation="drawer"] .cycle-review-card {
+  width: min(570px, 94vw);
+  height: calc(100dvh - 24px);
+  max-height: none;
+  border: 1px solid #d7dfd4;
+  border-radius: 18px;
+  pointer-events: auto;
+}
 
 .setup-screen {
   display: grid;
@@ -880,7 +896,7 @@ input[type="range"]::-webkit-slider-thumb {
   position: fixed;
   inset: 0;
   z-index: 90;
-  pointer-events: none;
+  pointer-events: auto;
   background: transparent;
 }
 .tutorial-spotlight {
@@ -911,6 +927,17 @@ input[type="range"]::-webkit-slider-thumb {
 .tutorial-actions button { border: 0; border-radius: 10px; background: var(--ink); color: #fff; padding: 9px 13px; font-weight: 800; }
 .tutorial-actions .quiet-button { border: 1px solid var(--line); background: #edf0e8; color: var(--ink); }
 .tutorial-focus { box-shadow: 0 0 0 3px #f3c866 !important; }
+
+.quick-start-button {
+  width: 100%;
+  margin: -12px 0 16px;
+  border: 1px solid #b8c9b6;
+  border-radius: 11px;
+  background: #edf4e9;
+  color: #244a3b;
+  padding: 10px 14px;
+  font-weight: 800;
+}
 
 /* Three persisted font levels. Medium is intentionally about 15% larger than the original UI. */
 .app-shell, .setup-screen, .modal-card, .tutorial-card, .properties-drawer { font-size: calc(14px * var(--font-scale)); }
@@ -1409,11 +1436,18 @@ input[type="range"]::-webkit-slider-thumb {
 
 @media (max-width: 899px) {
   .unified-layout { width: min(100% - 12px, 1800px); padding-bottom: 58px; }
-  .app-header { align-items: flex-start; }
-  .header-actions { justify-content: flex-end; }
+  .app-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+    gap: 9px;
+  }
+  .header-actions { justify-content: flex-start; }
+  .header-actions :is(button, .font-controls button) { min-height: 40px; }
+  #edit-layout-button, #reset-layout-button { display: none; }
   .workspace-root {
     height: auto;
-    min-height: 0;
+    min-height: 520px;
     overflow: visible;
     border: 0;
     background: transparent;
@@ -1423,12 +1457,17 @@ input[type="range"]::-webkit-slider-thumb {
     left: auto !important;
     top: auto !important;
     width: auto !important;
-    height: auto !important;
   }
   .workspace-panel[data-panel-id="map"] {
     position: relative;
     display: flex;
-    min-height: 0;
+    height: auto !important;
+    min-height: 520px;
+    overflow: visible;
+  }
+  .workspace-panel[data-panel-id="map"] > .workspace-panel-content {
+    flex: 0 0 auto;
+    overflow: visible;
   }
   .workspace-panel:not([data-panel-id="map"]) {
     position: fixed;
@@ -1437,6 +1476,7 @@ input[type="range"]::-webkit-slider-thumb {
     bottom: 49px;
     left: 8px !important;
     display: flex;
+    height: min(72dvh, 720px) !important;
     max-height: min(72vh, 720px);
     border-radius: 17px 17px 10px 10px;
     box-shadow: 0 -18px 55px #10271f55;
@@ -1450,14 +1490,19 @@ input[type="range"]::-webkit-slider-thumb {
     pointer-events: auto;
     transform: translateY(0);
   }
-  .workspace-panel:not([data-panel-id="map"]) .workspace-panel-content { max-height: calc(72vh - 38px); }
+  :root[data-tutorial-open] .workspace-panel:not([data-panel-id="map"]) { transition: none; }
+  .workspace-panel:not([data-panel-id="map"]) .workspace-panel-content {
+    max-height: calc(72dvh - 38px);
+    overflow-y: auto;
+  }
   .workspace-titlebar { cursor: default; }
   .workspace-window-actions [data-window-action="dock"],
   .workspace-window-actions [data-window-action="restore"],
   .workspace-resize-handle { display: none; }
-  .workspace-map-stack { display: block; height: auto; padding: 5px; }
-  .workspace-map .map-panel { height: auto; }
-  .workspace-map .map-canvas-wrap { width: 100%; min-height: 0; aspect-ratio: 1; }
+  .workspace-map-stack { display: block; height: auto; min-height: 0; padding: 5px; }
+  .workspace-map-main { display: block; }
+  .workspace-map .map-panel { height: auto; min-height: 0; }
+  .workspace-map .map-canvas-wrap { width: 100%; height: auto !important; min-height: 320px; flex: none; aspect-ratio: 1; }
   .workspace-map .simulation-controls, .workspace-map .map-event-strip { margin-top: 7px; }
   .map-functional-legend { flex-wrap: wrap; }
   .map-query-popover { position: absolute; z-index: 22; width: min(300px, calc(100% - 30px)); max-height: 280px; overflow: auto; border: 1px solid #d9e1d7; border-radius: 11px; background: #fffdf6f2; box-shadow: 0 9px 30px #17342538; transform: translate(10px, 10px); }
@@ -1473,9 +1518,26 @@ input[type="range"]::-webkit-slider-thumb {
   }
   .workspace-taskbar button { flex: 1; padding: 7px 10px; }
   .workspace-taskbar span { display: none; }
+  #cycle-review-modal[data-presentation="drawer"] {
+    place-items: end stretch;
+    padding: 8px 8px 53px;
+  }
+  #cycle-review-modal[data-presentation="drawer"] .cycle-review-card {
+    width: 100%;
+    height: min(50dvh, 470px);
+    border-radius: 18px 18px 10px 10px;
+  }
 }
 
 @media (max-width: 560px) {
+  .app-header h1 { font-size: 28px; }
+  .header-actions { gap: 6px; }
+  .header-actions .quiet-button { padding: 8px 9px; }
+  #export-button { display: none; }
+  .tutorial-card { padding: 14px; }
+  .tutorial-card h2 { font-size: calc(21px * var(--font-scale)); }
+  .tutorial-card p { margin-bottom: 12px; line-height: 1.5; }
+  .tutorial-actions button { min-height: 40px; padding: 8px 11px; }
   .workspace-map .map-heading { align-items: flex-start; }
   .workspace-map .map-summary { max-width: 60%; }
   .map-footer #map-scale-text { display: none; }
@@ -1589,7 +1651,7 @@ input[type="range"]::-webkit-slider-thumb {
   .workspace-map .map-event-strip .event-status { min-width: 0; max-width: min(360px, 42%); flex: 0 0 auto; overflow: hidden; }
   .workspace-map .map-event-strip .event-status strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  .workspace-strategy .workspace-panel-content { overflow: hidden; }
+  .workspace-strategy .workspace-panel-content { overflow-y: auto; }
   .workspace-strategy .allocation-panel { min-height: 0; }
   .workspace-strategy .allocation-dock {
     display: flex;
