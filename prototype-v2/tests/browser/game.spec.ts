@@ -149,6 +149,7 @@ test('five-year commitment pauses for a prediction verdict and a new mutually ex
   await expect(page.locator('#cycle-review-events')).toContainText('人口账')
   await expect(page.locator('#cycle-review-events')).toContainText('林窗账')
   await expect(page.locator('#cycle-review-events')).toContainText('机缘账')
+  await expect(page.locator('#cycle-review-events')).toContainText('招募过程账')
   const nextDraft = page.locator('#cycle-review-modal [data-opportunity-draft-root]')
   await expect(nextDraft.locator('[data-opportunity-card]')).toHaveCount(3)
   await expect(page.locator('[data-cycle-preset="pioneer"]')).toBeDisabled()

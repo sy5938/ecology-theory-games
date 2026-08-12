@@ -155,6 +155,12 @@ describe('five-year strategy game loop', () => {
     expect(first.ok).toBe(true)
     expect(simulation.strategyLockedUntil).toBeCloseTo(5, 8)
     expect(simulation.strategyCommitStatus()).toMatchObject({ available: false, early: false })
+    simulation.processLedger.record({
+      speciesCode: simulation.playerCode,
+      year: simulation.forestYear,
+      type: 'seed_created',
+      amount: 2,
+    })
 
     simulation.warning = {
       type: 'typhoon',
@@ -170,12 +176,22 @@ describe('five-year strategy game loop', () => {
     expect(early).toMatchObject({ ok: true, cost: 6 })
     expect(simulation.playerState.reserve).toBeCloseTo(reserveBefore - 6, 8)
     expect(simulation.strategyReviews.at(-1)?.endedEarly).toBe(true)
+    expect(simulation.strategyReviews.at(-1)?.processTotals.seed_created).toBe(2)
     expect(simulation.currentOpportunityRecord).toMatchObject({ cycle: 2, choices: [], passed: true })
+    const interruptedTotals = simulation.strategyReviews.at(-1)!.processTotals
+    simulation.processLedger.record({
+      speciesCode: simulation.playerCode,
+      year: simulation.forestYear,
+      type: 'seed_created',
+      amount: 3,
+    })
+    expect(interruptedTotals.seed_created).toBe(2)
   })
 
   it('publishes a causal review after each completed five-year commitment', () => {
     const simulation = makeSimulation('sparse', 10, 7788)
     resolveOpportunity(simulation)
+    const cycleStartCursor = simulation.processLedger.cursor
     simulation.commitPlayerStrategy({ growth: 0.4, reproduction: 0.3, reserve: 0.3 }, 'resilience')
     advanceTo(simulation, 5.2)
     expect(simulation.strategyReview).toMatchObject({
@@ -187,13 +203,44 @@ describe('five-year strategy game loop', () => {
       predictionMet: expect.any(Boolean),
     })
     expect(simulation.strategyReview!.after.population).toBeGreaterThan(0)
-    expect(simulation.strategyReview!.evidence).toHaveLength(5)
+    expect(simulation.strategyReview!.evidence).toHaveLength(6)
     expect(simulation.strategyReview!.evidence.join(' ')).toContain('主因判断')
     expect(simulation.strategyReview!.evidence.join(' ')).toContain('人口账')
     expect(simulation.strategyReview!.evidence.join(' ')).toContain('林窗账')
     expect(simulation.strategyReview!.evidence.join(' ')).toContain('机缘账')
+    expect(simulation.strategyReview!.evidence.join(' ')).toContain('招募过程账')
+    expect(simulation.strategyReview!.processTotals.reproduction_credit_added).toBeGreaterThan(0)
+    expect(simulation.strategyReview!.processTotals.long_distance_seed)
+      .toBeLessThanOrEqual(simulation.strategyReview!.processTotals.seed_created)
+    expect(simulation.strategyReview!.processTotals.grid_colonized)
+      .toBeLessThanOrEqual(simulation.strategyReview!.processTotals.seed_established)
+    expect(simulation.strategyReview!.processTotals).toEqual(
+      simulation.processLedger.totalsSince(cycleStartCursor, simulation.playerCode),
+    )
     expect(simulation.strategyReviews).toHaveLength(1)
     expect(simulation.strategyCommitStatus().available).toBe(true)
+  })
+
+  it('labels carried-seed establishment as an independent period flow instead of a causal funnel', () => {
+    const pioneer = SPECIES.find((species) => species.code === 'SASTZU')!
+    const simulation = new ForestSimulation(SPECIES, pioneer.code, {
+      scenarioId: 'colonization', densityPer400m2: 10, seed: 2,
+    })
+    expect(simulation.passOpportunityCards().ok).toBe(true)
+    expect(simulation.commitPlayerStrategy({ growth: 0.5, reproduction: 0, reserve: 0.5 }).ok).toBe(true)
+
+    advanceTo(simulation, 5.2)
+
+    expect(simulation.strategyReview!.processTotals).toMatchObject({
+      reproduction_credit_added: 0,
+      seed_created: 0,
+      seed_established: 1,
+      grid_colonized: 1,
+    })
+    const processEvidence = simulation.strategyReview!.evidence.at(-1)!
+    expect(processEvidence).toContain('本周期独立流量')
+    expect(processEvidence).toContain('建立可来自期初或上周期种子')
+    expect(processEvidence).not.toContain('→')
   })
 
   it('does not award the closed-forest objective merely for waiting', () => {
@@ -405,10 +452,17 @@ describe('successional strategy contrast', () => {
     const population = simulation.population(pioneer.code)
     const established = population.filter((individual) => individual.stage !== 'seed')
     const occupiedTenMeterCells = new Set(established.map(({ x, y }) => `${Math.floor(x * 10)}:${Math.floor(y * 10)}`))
+    const processTotals = simulation.processLedger.totalsSince(0, pioneer.code)
 
     expect(population.length).toBeGreaterThan(12)
     expect(established.length).toBeGreaterThan(8)
     expect(occupiedTenMeterCells.size).toBeGreaterThan(6)
+    expect(processTotals.reproduction_credit_added).toBeGreaterThan(0)
+    expect(processTotals.seed_created).toBeGreaterThan(0)
+    expect(processTotals.seed_established).toBeGreaterThan(0)
+    expect(processTotals.grid_colonized).toBeGreaterThan(0)
+    expect(processTotals.long_distance_seed).toBeLessThanOrEqual(processTotals.seed_created)
+    expect(processTotals.grid_colonized).toBeLessThanOrEqual(processTotals.seed_established)
   })
 
   it('gives shade-tolerant juveniles low-light protection and a three-year release after canopy death', () => {
@@ -417,7 +471,7 @@ describe('successional strategy contrast', () => {
       scenarioId: 'closed', densityPer400m2: 30, seed: 7788,
     })
     const shadeSapling = simulation.individuals
-      .filter((individual) => individual.species.strategy === 'shade' && individual.stage === 'sapling')
+      .filter((individual) => individual.species.code === shadeSpecies.code && individual.stage === 'sapling')
       .sort((first, second) => simulation.lightAt(first.x, first.y) - simulation.lightAt(second.x, second.y))[0]
     const sunPeer = simulation.individuals.find((individual) => individual.species.strategy === 'sun' && individual.stage === 'sapling')!
     sunPeer.x = shadeSapling.x
@@ -434,9 +488,45 @@ describe('successional strategy contrast', () => {
     expect(lightAfterGap - lightBeforeGap).toBeGreaterThanOrEqual(0.2)
     advanceOneStep(simulation)
     expect(shadeSapling.releaseUntil - simulation.forestYear).toBeGreaterThan(2.9)
+    const firstReleaseCount = simulation.processLedger.total(shadeSpecies.code, 'gap_release')
+    expect(firstReleaseCount).toBe(simulation.releasedPlayerCount)
+    expect(firstReleaseCount).toBeGreaterThan(0)
+    shadeSapling.previousLight = Math.max(0, simulation.lightAt(shadeSapling.x, shadeSapling.y) - 0.25)
+    advanceOneStep(simulation)
+    expect(simulation.processLedger.total(shadeSpecies.code, 'gap_release')).toBe(firstReleaseCount)
     expect(gapReleaseMultiplier('shade', true)).toBe(2)
     expect(gapReleaseMultiplier('broad', true)).toBe(1.4)
     expect(gapReleaseMultiplier('sun', true)).toBe(1)
+  })
+
+  it('does not count transplant-driven light gain as a natural gap release', () => {
+    const shadeSpecies = SPECIES.find((species) => species.code === 'MACLEP')!
+    const simulation = new ForestSimulation(SPECIES, shadeSpecies.code, {
+      scenarioId: 'closed', densityPer400m2: 30, seed: 7788,
+    })
+    const juvenile = simulation.individuals
+      .filter((individual) => simulation.canTransplant(individual) && individual.stage === 'sapling')
+      .sort((first, second) => simulation.lightAt(first.x, first.y) - simulation.lightAt(second.x, second.y))[0]
+    const destination = Array.from({ length: 19 * 19 }, (_, index) => ({
+      x: 0.05 + (index % 19) * 0.05,
+      y: 0.05 + Math.floor(index / 19) * 0.05,
+    }))
+      .filter(({ x, y }) => simulation.individuals.every((individual) => (
+        Math.hypot((individual.x - x) * 100, (individual.y - y) * 100) >= 0.55
+      )))
+      .sort((first, second) => simulation.lightAt(second.x, second.y) - simulation.lightAt(first.x, first.y))[0]
+    if (!juvenile || !destination) throw new Error('Expected a transplantable sapling and an open destination.')
+    const oldLight = simulation.lightAt(juvenile.x, juvenile.y)
+    expect(simulation.lightAt(destination.x, destination.y) - oldLight).toBeGreaterThanOrEqual(0.2)
+    const releasesBefore = simulation.processLedger.total(shadeSpecies.code, 'gap_release')
+    const colonizedBefore = simulation.processLedger.total(shadeSpecies.code, 'grid_colonized')
+
+    expect(simulation.transplant(juvenile.id, destination.x, destination.y).ok).toBe(true)
+    advanceOneStep(simulation)
+
+    expect(juvenile.releaseUntil).toBeLessThanOrEqual(simulation.forestYear)
+    expect(simulation.processLedger.total(shadeSpecies.code, 'gap_release')).toBe(releasesBefore)
+    expect(simulation.processLedger.total(shadeSpecies.code, 'grid_colonized')).toBe(colonizedBefore)
   })
 
   it.each([101, 2026, 7788])('lets a shade-tolerant population keep a multi-stage bank under closed canopy (seed %i)', (seed) => {

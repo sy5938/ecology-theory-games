@@ -8,6 +8,8 @@ import {
   type CommunityStatistics,
   type SpeciesStatistics,
 } from './community-stats'
+import { ProcessLedger, type ProcessLedgerTotals } from './process-ledger'
+import { RecruitmentGrid, type GridOccupationSource } from './recruitment-grid'
 export type { CommunityStatistics, SpeciesStatistics, StageCounts } from './community-stats'
 
 export type Stage = 'seed' | 'seedling' | 'sapling' | 'adult'
@@ -285,6 +287,7 @@ export interface StrategyCycleReview {
   prediction: StrategyPrediction
   predictionMet: boolean
   opportunity: OpportunityDraftRecord | null
+  processTotals: ProcessLedgerTotals
   evidence: string[]
   before: StrategyCycleMetrics
   after: StrategyCycleMetrics
@@ -553,6 +556,7 @@ export class ForestSimulation {
   readonly individualSnapshots: IndividualSnapshot[] = []
   readonly strategyReviews: StrategyCycleReview[] = []
   readonly opportunityHistory: OpportunityDraftRecord[] = []
+  readonly processLedger = new ProcessLedger()
   readonly seed: number
   readonly densityPer400m2: number
   readonly initialCommunitySize: number
@@ -595,6 +599,8 @@ export class ForestSimulation {
   private canopyCoverValue = 0
   private strategyCycleIndex = 0
   private readonly releasedPlayerIds = new Set<number>()
+  private readonly releasedIndividualIds = new Set<number>()
+  private readonly establishedGridCells = new RecruitmentGrid(10)
   private strategyCycleBaseline: {
     cycle: number
     startedAt: number
@@ -602,6 +608,7 @@ export class ForestSimulation {
     allocation: Allocation
     prediction: StrategyPrediction
     opportunityIndex: number
+    processCursor: number
     metrics: StrategyCycleMetrics
     eventIndex: number
   } | null = null
@@ -655,6 +662,7 @@ export class ForestSimulation {
     }
 
     this.seedScenario()
+    this.initializeEstablishedGridCells()
     this.initialCommunitySize = this.individuals.length
     this.maxIndividuals = Math.max(20_000, Math.ceil(this.initialCommunitySize * 1.5))
     this.recalculateCanopyAndLight()
@@ -951,6 +959,7 @@ export class ForestSimulation {
       allocation: { ...normalized },
       prediction: this.strategyPrediction(predictionKey),
       opportunityIndex,
+      processCursor: this.processLedger.cursor,
       metrics: this.strategyCycleMetrics(),
       eventIndex: this.events.length,
     }
@@ -1078,6 +1087,7 @@ export class ForestSimulation {
     const opportunity = opportunitySource
       ? { ...opportunitySource, choices: [...opportunitySource.choices] }
       : null
+    const processTotals = this.processLedger.totalsSince(baseline.processCursor, this.playerCode)
     const opportunityEvidence = opportunity?.selected
       ? opportunity.used
         ? `机缘账：使用“${OPPORTUNITY_CARDS[opportunity.selected].title}”；${opportunity.outcome}`
@@ -1091,6 +1101,7 @@ export class ForestSimulation {
         : '林窗账：本周期没有玩家幼树达到 20% 光照跃升，尚未形成可利用的释放机会。',
       `风险账：储备 ${changes.reserve >= 0 ? '+' : ''}${changes.reserve.toFixed(1)}，平均健康 ${changes.averageHealth >= 0 ? '+' : ''}${Math.round(changes.averageHealth * 100)} 个百分点。`,
       opportunityEvidence,
+      `招募过程账（本周期独立流量；建立可来自期初或上周期种子）：繁殖信用 +${processTotals.reproduction_credit_added.toFixed(1)}；进入地图的新种子 ${processTotals.seed_created} 粒（采用长尾核 ${processTotals.long_distance_seed}）；建立 ${processTotals.seed_established} 株；首次占据 ${processTotals.grid_colonized} 个十米网格。`,
     ]
     const review: StrategyCycleReview = {
       cycle: baseline.cycle,
@@ -1102,6 +1113,7 @@ export class ForestSimulation {
       prediction: { ...baseline.prediction },
       predictionMet,
       opportunity,
+      processTotals,
       evidence,
       before: baseline.metrics,
       after,
@@ -1206,9 +1218,11 @@ export class ForestSimulation {
     const oldLight = this.lightAt(individual.x, individual.y)
     individual.x = Math.max(0.01, Math.min(0.99, nextX))
     individual.y = Math.max(0.01, Math.min(0.99, nextY))
+    this.registerEstablishedGridCell(individual, 'transplant')
     individual.transplanted = true
     individual.health = Math.max(0.3, individual.health - 0.04)
     const newLight = this.lightAt(individual.x, individual.y)
+    individual.previousLight = newLight
     const message = `移栽 ${individual.species.name}：光照 ${Math.round(oldLight * 100)}% → ${Math.round(newLight * 100)}%，健康付出 4%。`
     this.addEvent(message, newLight >= oldLight ? 'good' : 'neutral', 'ability')
     this.recordIndividual(individual, true)
@@ -1661,7 +1675,16 @@ export class ForestSimulation {
       population.filter((individual) => individual.stage === 'adult').map((individual) => individual.insectPressure),
     )
     const fecundity = 0.75 + state.species.profile.seedOutput * 0.7
-    state.reproductionCredit += reproductionPool * fecundity * (1 - adultInsectPressure * 0.58)
+    const reproductionCreditAdded = reproductionPool * fecundity * (1 - adultInsectPressure * 0.58)
+    state.reproductionCredit += reproductionCreditAdded
+    if (reproductionCreditAdded > 0) {
+      this.processLedger.record({
+        speciesCode: state.species.code,
+        year: this.forestYear,
+        type: 'reproduction_credit_added',
+        amount: reproductionCreditAdded,
+      })
+    }
     const adults = population.filter((individual) => individual.stage === 'adult')
     const seedCost = 2.2 + state.species.profile.seedMass * 2.6
     const monthlyCap = Math.round(5 + state.species.profile.seedOutput * 5)
@@ -1690,13 +1713,18 @@ export class ForestSimulation {
     const longMean = 8 + species.profile.dispersal * 19
     let nextX = mother.x
     let nextY = mother.y
+    let acceptedLongDistance = false
     for (let attempt = 0; attempt < 24; attempt += 1) {
-      const meanMeters = this.random.next() < tailChance ? longMean : localMean
+      const longDistance = this.random.next() < tailChance
+      const meanMeters = longDistance ? longMean : localMean
       const angle = this.random.between(0, Math.PI * 2)
       const radiusMeters = -Math.log(Math.max(1e-8, 1 - this.random.next())) * meanMeters
       nextX = mother.x + (Math.cos(angle) * radiusMeters) / MAP_WIDTH_METERS
       nextY = mother.y + (Math.sin(angle) * radiusMeters) / MAP_HEIGHT_METERS
-      if (nextX >= 0 && nextX < 1 && nextY >= 0 && nextY < 1) break
+      if (nextX >= 0 && nextX < 1 && nextY >= 0 && nextY < 1) {
+        acceptedLongDistance = longDistance
+        break
+      }
     }
     if (nextX < 0 || nextX >= 1 || nextY < 0 || nextY >= 1) return
     const seed = this.makeIndividual(
@@ -1707,6 +1735,10 @@ export class ForestSimulation {
     )
     this.individuals.push(seed)
     this.recordIndividual(seed, true)
+    this.processLedger.record({ speciesCode: species.code, year: this.forestYear, type: 'seed_created' })
+    if (acceptedLongDistance) {
+      this.processLedger.record({ speciesCode: species.code, year: this.forestYear, type: 'long_distance_seed' })
+    }
   }
 
   private applyEstablishmentAndMortality(): void {
@@ -1738,6 +1770,18 @@ export class ForestSimulation {
           individual.dbh = 0.2
           individual.health = 0.72
           this.recordIndividual(individual, true)
+          this.processLedger.record({
+            speciesCode: individual.species.code,
+            year: this.forestYear,
+            type: 'seed_established',
+          })
+          if (this.registerEstablishedGridCell(individual, 'establishment')) {
+            this.processLedger.record({
+              speciesCode: individual.species.code,
+              year: this.forestYear,
+              type: 'grid_colonized',
+            })
+          }
         } else if (this.random.next() < seedSelfThinning) {
           this.damage(individual, 2, 'competition')
         } else if (individual.ageYears > 4 || this.random.next() < 0.012 + individual.pathogenPressure * 0.018) {
@@ -1772,6 +1816,14 @@ export class ForestSimulation {
       if (individual.stage === 'sapling' && light - individual.previousLight >= 0.2) {
         const gapYears = this.states.get(individual.species.code)!.gapBoostUntil > this.forestYear ? 5 : 3
         individual.releaseUntil = this.forestYear + gapYears
+        if (!this.releasedIndividualIds.has(individual.id)) {
+          this.releasedIndividualIds.add(individual.id)
+          this.processLedger.record({
+            speciesCode: individual.species.code,
+            year: this.forestYear,
+            type: 'gap_release',
+          })
+        }
         if (individual.species.code === this.playerCode) this.releasedPlayerIds.add(individual.id)
       }
       individual.previousLight = light
@@ -1800,6 +1852,21 @@ export class ForestSimulation {
 
   private spatialKey(x: number, y: number): string {
     return `${Math.floor((x * MAP_WIDTH_METERS) / PRESSURE_RADIUS_METERS)}:${Math.floor((y * MAP_HEIGHT_METERS) / PRESSURE_RADIUS_METERS)}`
+  }
+
+  private initializeEstablishedGridCells(): void {
+    for (const individual of this.individuals) {
+      if (individual.stage !== 'seed') this.registerEstablishedGridCell(individual, 'initial')
+    }
+  }
+
+  private registerEstablishedGridCell(individual: Individual, source: GridOccupationSource): boolean {
+    return this.establishedGridCells.register(
+      individual.species.code,
+      individual.x,
+      individual.y,
+      source,
+    ).gridColonized
   }
 
   private neighbors(individual: Individual, index: Map<string, Individual[]>): Individual[] {
